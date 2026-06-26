@@ -186,6 +186,34 @@
                 <small>给每个元素四周保留空白</small>
                 <input id="padding" type="range" min="0" max="80" value="12" />
               </label>
+              <label>
+                <span>边缘平滑 <output id="edgeSmoothOut">2</output></span>
+                <small>减少锯齿，数值越高越柔和</small>
+                <input id="edgeSmooth" type="range" min="0" max="6" step="1" value="2" />
+              </label>
+              <label>
+                <span>羽化 <output id="featherOut">1</output></span>
+                <small>让边缘过渡更自然</small>
+                <input id="feather" type="range" min="0" max="5" step="1" value="1" />
+              </label>
+              <label>
+                <span>去残影 <output id="cleanupOut">24</output></span>
+                <small>清理低透明背景残留</small>
+                <input id="cleanup" type="range" min="0" max="96" step="1" value="24" />
+              </label>
+              <label>
+                透明度增强
+                <select id="alphaBoost">
+                  <option value="soft">柔和</option>
+                  <option value="standard" selected>标准</option>
+                  <option value="clean">干净</option>
+                </select>
+              </label>
+              <label>
+                <span>边缘收缩/扩张 <output id="edgeOffsetOut">0</output></span>
+                <small>负数收缩边缘，正数扩张边缘</small>
+                <input id="edgeOffset" type="range" min="-4" max="4" step="1" value="0" />
+              </label>
               <label class="check-row">
                 <input id="showBoxes" type="checkbox" />
                 <span>
@@ -221,7 +249,20 @@
               <button type="button" class="format-segment" data-format="webp">WebP</button>
               <button type="button" class="format-segment" data-format="svg">SVG</button>
             </div>
-            <p class="export-hint">处理完成后可导出 PNG / WebP / SVG。</p>
+            <label>
+              导出倍数
+              <select id="exportScale">
+                <option value="1" selected>1x</option>
+                <option value="2">2x</option>
+                <option value="3">3x</option>
+                <option value="custom">自定义</option>
+              </select>
+            </label>
+            <label id="customScaleRow" hidden>
+              <span>自定义倍数 <output id="customScaleOut">1</output>x</span>
+              <input id="customScale" type="number" min="0.1" max="8" step="0.1" value="1" />
+            </label>
+            <p class="export-hint" id="exportHint">处理完成后可导出 PNG / WebP / SVG。</p>
             <button id="downloadBatchZipBtn" type="button" class="ghost" disabled>批量处理并下载 ZIP</button>
           </section>
 
@@ -231,6 +272,20 @@
               <span>补救操作</span>
             </div>
             <p class="small">重新识别，或开启手动框选，把粘连元素单独切出。</p>
+            <label>
+              锁定比例
+              <select id="aspectLock">
+                <option value="free" selected>原始比例</option>
+                <option value="1:1">1:1</option>
+                <option value="4:3">4:3</option>
+                <option value="16:9">16:9</option>
+              </select>
+            </label>
+            <div class="manual-readout" id="manualReadout">当前框选：未选择</div>
+            <div class="manual-preview">
+              <span>当前切片预览</span>
+              <canvas id="manualPreviewCanvas"></canvas>
+            </div>
             <button id="manualModeBtn" type="button" class="ghost" disabled>开启框选</button>
             <button id="exportSelectionBtn" type="button" class="ghost" disabled>导出当前框选</button>
           </section>

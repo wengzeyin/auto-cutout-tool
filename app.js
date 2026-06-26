@@ -18,11 +18,28 @@ const els = {
   padding: document.querySelector("#padding"),
   includeText: document.querySelector("#includeText"),
   showBoxes: document.querySelector("#showBoxes"),
+  edgeSmooth: document.querySelector("#edgeSmooth"),
+  feather: document.querySelector("#feather"),
+  cleanup: document.querySelector("#cleanup"),
+  alphaBoost: document.querySelector("#alphaBoost"),
+  edgeOffset: document.querySelector("#edgeOffset"),
   alphaOut: document.querySelector("#alphaOut"),
   colorOut: document.querySelector("#colorOut"),
   areaOut: document.querySelector("#areaOut"),
   padOut: document.querySelector("#padOut"),
+  edgeSmoothOut: document.querySelector("#edgeSmoothOut"),
+  featherOut: document.querySelector("#featherOut"),
+  cleanupOut: document.querySelector("#cleanupOut"),
+  edgeOffsetOut: document.querySelector("#edgeOffsetOut"),
   formatSelect: document.querySelector("#formatSelect"),
+  exportHint: document.querySelector("#exportHint"),
+  exportScale: document.querySelector("#exportScale"),
+  customScale: document.querySelector("#customScale"),
+  customScaleOut: document.querySelector("#customScaleOut"),
+  customScaleRow: document.querySelector("#customScaleRow"),
+  aspectLock: document.querySelector("#aspectLock"),
+  manualReadout: document.querySelector("#manualReadout"),
+  manualPreviewCanvas: document.querySelector("#manualPreviewCanvas"),
   formatSegments: [...document.querySelectorAll(".format-segment")],
   processBtn: document.querySelector("#processBtn"),
   rescanBtn: document.querySelector("#rescanBtn"),
@@ -55,6 +72,12 @@ const state = {
   file: null,
   imageName: "image",
   cutoutBlob: null,
+  originalCutoutBlob: null,
+  cutoutOriginalCanvas: document.createElement("canvas"),
+  refinedCutoutCanvas: document.createElement("canvas"),
+  processingToken: 0,
+  refineTimer: 0,
+  alphaNormalized: false,
   components: [],
   queue: [],
   currentItem: null,
@@ -160,6 +183,17 @@ function bindEvents() {
     updateDownloadLabels();
     syncFormatSegments();
     renderCards();
+    updateManualPreview();
+  });
+  els.exportScale.addEventListener("change", () => {
+    syncOutputs();
+    renderCards();
+    updateManualPreview();
+  });
+  els.customScale.addEventListener("input", () => {
+    syncOutputs();
+    renderCards();
+    updateManualPreview();
   });
   for (const segment of els.formatSegments) {
     segment.addEventListener("click", () => {
@@ -171,15 +205,40 @@ function bindEvents() {
     toggle.addEventListener("click", () => setPreviewMode(toggle.dataset.preview));
   }
 
+  for (const input of [els.edgeSmooth, els.feather, els.cleanup, els.edgeOffset]) {
+    input.addEventListener("input", () => {
+      syncOutputs();
+      scheduleRefine(200);
+    });
+    input.addEventListener("change", () => {
+      syncOutputs();
+      scheduleRefine(80);
+    });
+  }
+  els.alphaBoost.addEventListener("change", () => {
+    syncOutputs();
+    scheduleRefine(80);
+  });
+
   for (const input of [els.alphaThreshold, els.colorTolerance, els.minArea, els.padding]) {
     input.addEventListener("input", () => {
       if (input === els.minArea) state.minAreaTouched = true;
       syncOutputs();
+      if (input === els.padding) {
+        renderCards();
+        updateManualPreview();
+      }
     });
     input.addEventListener("change", () => {
       if (input === els.minArea) state.minAreaTouched = true;
       syncOutputs();
-      scheduleScan(350);
+      if (input === els.padding) {
+        renderCards();
+        updateManualPreview();
+      } else {
+        setStatus("正在更新识别结果...");
+        scheduleScan(400);
+      }
     });
   }
   for (const input of [els.detectMode, els.includeText, els.showBoxes]) {
@@ -212,7 +271,7 @@ function bindEvents() {
     }
     if (files.length) {
       event.preventDefault();
-      addFiles(files, "粘贴");
+      addFiles(files, "粘贴", { autoSelect: true, autoProcess: true });
     } else {
       setUploadFeedback("剪贴板里没有可读取的图片。", "warn");
     }
@@ -222,9 +281,10 @@ function bindEvents() {
   els.overlayCanvas.addEventListener("pointermove", moveSelection);
   els.overlayCanvas.addEventListener("pointerup", endSelection);
   els.overlayCanvas.addEventListener("pointercancel", endSelection);
+  document.addEventListener("keydown", handleSelectionKeys);
 }
 
-async function addFiles(files, source) {
+async function addFiles(files, source, options = {}) {
   const imageFiles = files.filter((file) => file?.type?.startsWith("image/"));
   const skipped = files.length - imageFiles.length;
 
@@ -250,12 +310,24 @@ async function addFiles(files, source) {
     };
   });
 
+  if (options.replaceCurrent && state.currentItem) {
+    const currentIndex = state.queue.findIndex((candidate) => candidate === state.currentItem);
+    if (currentIndex >= 0) state.queue.splice(currentIndex, 1);
+  }
   state.queue.push(...items);
   renderQueue();
-  setUploadFeedback(`${source}成功：已加入 ${items.length} 张图片${skipped ? `，跳过 ${skipped} 个非图片文件` : ""}。`, "ok");
+  setUploadFeedback(
+    options.autoProcess
+      ? `已粘贴图片，${state.processing ? "已加入队列，当前任务完成后可处理。" : "正在自动抠图..."}`
+      : `${source}成功：已加入 ${items.length} 张图片${skipped ? `，跳过 ${skipped} 个非图片文件` : ""}。`,
+    "ok",
+  );
   updateUiState();
 
-  if (!state.currentItem) {
+  if (options.autoSelect && !state.processing) {
+    await loadItem(items[0]);
+    if (options.autoProcess) await processImage({ message: "已粘贴图片，正在自动抠图..." });
+  } else if (!state.currentItem) {
     await loadItem(items[0]);
   } else {
     updateBatchButton();
@@ -267,6 +339,12 @@ function syncOutputs() {
   els.colorOut.value = els.colorTolerance.value;
   els.areaOut.value = els.minArea.value;
   els.padOut.value = els.padding.value;
+  els.edgeSmoothOut.value = els.edgeSmooth.value;
+  els.featherOut.value = els.feather.value;
+  els.cleanupOut.value = els.cleanup.value;
+  els.edgeOffsetOut.value = els.edgeOffset.value;
+  els.customScaleOut.textContent = String(getExportScale());
+  els.customScaleRow.hidden = els.exportScale.value !== "custom";
 }
 
 function applyDynamicDefaults(width, height) {
@@ -288,6 +366,19 @@ function scheduleScan(delay = 350) {
   }, delay);
 }
 
+function scheduleRefine(delay = 200) {
+  if (!state.originalCutoutBlob && !state.cutoutOriginalCanvas.width) return;
+  window.clearTimeout(state.refineTimer);
+  state.refineTimer = window.setTimeout(async () => {
+    setStatus("正在实时更新边缘效果...");
+    await refineAndPreviewCutout();
+  }, delay);
+}
+
+function nextFrame() {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
+
 function getExportSettings() {
   const allowed = new Set(["png", "webp", "svg"]);
   const ext = allowed.has(els.formatSelect.value) ? els.formatSelect.value : "png";
@@ -298,11 +389,32 @@ function getExportSettings() {
   };
 }
 
+function getExportScale() {
+  if (els.exportScale.value === "custom") {
+    return clamp(Number(els.customScale.value) || 1, 0.1, 8);
+  }
+  return Number(els.exportScale.value) || 1;
+}
+
+function getRefineSettings() {
+  return {
+    edgeSmooth: Number(els.edgeSmooth.value),
+    feather: Number(els.feather.value),
+    cleanup: Number(els.cleanup.value),
+    alphaBoost: els.alphaBoost.value,
+    edgeOffset: Number(els.edgeOffset.value),
+  };
+}
+
 function updateDownloadLabels() {
   const { label } = getExportSettings();
   els.downloadCutoutBtn.textContent = `下载整张抠图 ${label}`;
   els.downloadZipBtn.textContent = "下载全部 ZIP";
   els.downloadBatchZipBtn.textContent = `批量处理并下载 ZIP`;
+  els.exportHint.textContent =
+    els.formatSelect.value === "svg"
+      ? "SVG 为内嵌 PNG 位图，用于兼容设计软件，不是矢量路径。"
+      : "处理完成后可导出 PNG / WebP / SVG。";
   for (const button of els.elementGrid.querySelectorAll("[data-download-element]")) {
     button.textContent = `下载 ${label}`;
   }
@@ -319,14 +431,20 @@ async function loadItem(item) {
 
   try {
     const bitmap = await createImageBitmap(item.file);
+    item.originalWidth = bitmap.width;
+    item.originalHeight = bitmap.height;
     drawBitmapToCanvas(bitmap, els.sourceCanvas, sourceCtx);
     applyDynamicDefaults(els.sourceCanvas.width, els.sourceCanvas.height);
     sizeOverlay();
 
     if (item.cutoutBlob) {
+      const originalBitmap = await createImageBitmap(item.originalCutoutBlob || item.cutoutBlob);
+      drawBitmapToCanvas(originalBitmap, state.cutoutOriginalCanvas, state.cutoutOriginalCanvas.getContext("2d"), Infinity);
       const resultBitmap = await createImageBitmap(item.filteredCutoutBlob || item.cutoutBlob);
-      drawBitmapToCanvas(resultBitmap, els.resultCanvas, resultCtx);
+      drawBitmapToCanvas(resultBitmap, state.refinedCutoutCanvas, state.refinedCutoutCanvas.getContext("2d"), Infinity);
+      drawCanvasToPreview(state.refinedCutoutCanvas, els.resultCanvas, resultCtx);
       state.cutoutBlob = item.cutoutBlob;
+      state.originalCutoutBlob = item.originalCutoutBlob || item.cutoutBlob;
       state.components = item.components || [];
       els.rescanBtn.disabled = false;
       els.downloadCutoutBtn.disabled = false;
@@ -404,6 +522,12 @@ function roundRect(ctx, x, y, width, height, radius) {
 
 function resetResult() {
   state.cutoutBlob = null;
+  state.originalCutoutBlob = null;
+  state.alphaNormalized = false;
+  state.cutoutOriginalCanvas.width = 0;
+  state.cutoutOriginalCanvas.height = 0;
+  state.refinedCutoutCanvas.width = 0;
+  state.refinedCutoutCanvas.height = 0;
   state.components = [];
   state.selection = null;
   state.manual = false;
@@ -421,6 +545,7 @@ function resetResult() {
   els.exportSelectionBtn.disabled = true;
   updateBatchButton();
   renderCards();
+  updateManualPreview();
   hideProgress();
   updateUiState();
 }
@@ -503,10 +628,14 @@ function setUploadFeedback(message, tone = "") {
 }
 
 async function processImage(options = {}) {
-  if (!state.file) return;
+  if (!state.file || state.processing) return;
   const item = state.currentItem;
+  const token = ++state.processingToken;
   state.processing = true;
   setBusy(true, options.message || "首次处理会下载约几十 MB 的模型，请稍等...");
+  if (item && Math.max(item.originalWidth || 0, item.originalHeight || 0) > 3000) {
+    setStatus("图片较大，正在优化处理；预览和检测会使用低清副本，导出保留高清。", "大图处理中");
+  }
   setProgress(0, "0%");
   state.components = [];
   if (item) {
@@ -515,6 +644,7 @@ async function processImage(options = {}) {
     renderQueue();
   }
   renderCards();
+  await nextFrame();
 
   try {
     const blob = await removeBackground(state.file, {
@@ -529,13 +659,15 @@ async function processImage(options = {}) {
         }
       },
     });
+    if (token !== state.processingToken || item !== state.currentItem) return;
 
-    state.cutoutBlob = blob;
+    state.originalCutoutBlob = blob;
     const bitmap = await createImageBitmap(blob);
-    drawBitmapToCanvas(bitmap, els.resultCanvas, resultCtx);
+    drawBitmapToCanvas(bitmap, state.cutoutOriginalCanvas, state.cutoutOriginalCanvas.getContext("2d"), Infinity);
+    await refineAndPreviewCutout({ immediateScan: false });
     if (item) {
-      item.resultWidth = els.resultCanvas.width;
-      item.resultHeight = els.resultCanvas.height;
+      item.resultWidth = state.refinedCutoutCanvas.width;
+      item.resultHeight = state.refinedCutoutCanvas.height;
     }
     sizeOverlay();
     els.rescanBtn.disabled = false;
@@ -544,6 +676,7 @@ async function processImage(options = {}) {
     await scanAndRender();
     if (item) {
       item.status = "done";
+      item.originalCutoutBlob = state.originalCutoutBlob;
       item.cutoutBlob = state.cutoutBlob;
       item.components = [...state.components];
       item.message = `${state.components.length} 个元素`;
@@ -598,7 +731,7 @@ async function scanAndRender() {
       updateSelectionButtons();
       if (state.currentItem) {
         state.currentItem.components = [];
-        state.currentItem.filteredCutoutBlob = els.includeText.checked ? state.cutoutBlob : await canvasToBlob(els.resultCanvas);
+        state.currentItem.filteredCutoutBlob = state.cutoutBlob;
         state.currentItem.message = "完整前景";
         renderQueue();
       }
@@ -638,8 +771,10 @@ async function scanAndRender() {
     els.downloadZipBtn.disabled = state.components.length === 0 || state.components.length > 50;
     updateSelectionButtons();
     if (state.currentItem) {
+      state.currentItem.previewWidth = els.resultCanvas.width;
+      state.currentItem.previewHeight = els.resultCanvas.height;
       state.currentItem.components = [...state.components];
-      state.currentItem.filteredCutoutBlob = els.includeText.checked ? state.cutoutBlob : await canvasToBlob(els.resultCanvas);
+      state.currentItem.filteredCutoutBlob = state.cutoutBlob;
       state.currentItem.message = state.cutoutBlob ? `${state.components.length} 个元素` : state.currentItem.message;
       renderQueue();
     }
@@ -668,9 +803,187 @@ async function scanAndRender() {
 }
 
 async function redrawCutoutCanvas() {
-  const bitmap = await createImageBitmap(state.cutoutBlob);
-  drawBitmapToCanvas(bitmap, els.resultCanvas, resultCtx);
+  drawCanvasToPreview(state.refinedCutoutCanvas, els.resultCanvas, resultCtx);
   sizeOverlay();
+}
+
+async function refineAndPreviewCutout({ immediateScan = true } = {}) {
+  if (!state.cutoutOriginalCanvas.width) return;
+  const refineResult = refineCutoutAlpha(state.cutoutOriginalCanvas, getRefineSettings());
+  state.refinedCutoutCanvas = refineResult.canvas;
+  state.alphaNormalized = refineResult.alphaNormalized;
+  state.cutoutBlob = await canvasToBlob(state.refinedCutoutCanvas);
+  if (state.currentItem) {
+    state.currentItem.cutoutBlob = state.cutoutBlob;
+    state.currentItem.filteredCutoutBlob = state.cutoutBlob;
+    state.currentItem.originalCutoutBlob = state.originalCutoutBlob;
+  }
+  drawCanvasToPreview(state.refinedCutoutCanvas, els.resultCanvas, resultCtx);
+  sizeOverlay();
+  drawOverlay();
+  updateManualPreview();
+  if (state.alphaNormalized) setStatus("已自动增强主体透明度。", "透明度已修复");
+  if (immediateScan) scheduleScan(250);
+}
+
+function refineCutoutAlpha(sourceCanvas, settings) {
+  const canvas = document.createElement("canvas");
+  canvas.width = sourceCanvas.width;
+  canvas.height = sourceCanvas.height;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(sourceCanvas, 0, 0);
+  let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const alphaStats = analyzeAlpha(imageData);
+  const alphaNormalized = alphaStats.midRatio > 0.28 && alphaStats.average > 80 && alphaStats.average < 225;
+  imageData = applyAlphaOffset(imageData, settings.edgeOffset);
+  imageData = smoothAlpha(imageData, settings.edgeSmooth + settings.feather);
+  despeckleAlpha(imageData, settings.cleanup);
+  defringe(imageData);
+  const { data } = imageData;
+  const cleanup = settings.cleanup;
+  const solidThreshold = settings.alphaBoost === "clean" ? 168 : settings.alphaBoost === "soft" ? 230 : 205;
+  for (let index = 0; index < data.length; index += 4) {
+    const alpha = data[index + 3];
+    if (alpha < cleanup) {
+      data[index + 3] = 0;
+      continue;
+    }
+    if (alpha > solidThreshold || (alphaNormalized && alpha > 120)) {
+      data[index + 3] = 255;
+      continue;
+    }
+    const low = cleanup;
+    const high = solidThreshold;
+    const t = clamp((alpha - low) / Math.max(1, high - low), 0, 1);
+    const curve = t * t * (3 - 2 * t);
+    const boost = settings.alphaBoost === "clean" ? 1.18 : settings.alphaBoost === "soft" ? 0.92 : 1.05;
+    data[index + 3] = Math.round(clamp(curve * 255 * boost, 0, 255));
+  }
+  ctx.putImageData(imageData, 0, 0);
+  return { canvas, alphaNormalized };
+}
+
+function analyzeAlpha(imageData) {
+  const { data } = imageData;
+  let count = 0;
+  let sum = 0;
+  let mid = 0;
+  for (let index = 3; index < data.length; index += 4) {
+    const alpha = data[index];
+    if (alpha <= 16) continue;
+    count += 1;
+    sum += alpha;
+    if (alpha >= 80 && alpha <= 220) mid += 1;
+  }
+  return {
+    average: count ? sum / count : 0,
+    midRatio: count ? mid / count : 0,
+  };
+}
+
+function smoothAlpha(imageData, radius) {
+  radius = Math.round(radius);
+  if (radius <= 0) return imageData;
+  const { width, height, data } = imageData;
+  const source = new Uint8ClampedArray(data);
+  const passes = Math.min(3, radius);
+  for (let pass = 0; pass < passes; pass += 1) {
+    const current = new Uint8ClampedArray(data);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        let sum = 0;
+        let weight = 0;
+        for (let oy = -1; oy <= 1; oy += 1) {
+          const py = y + oy;
+          if (py < 0 || py >= height) continue;
+          for (let ox = -1; ox <= 1; ox += 1) {
+            const px = x + ox;
+            if (px < 0 || px >= width) continue;
+            const w = ox === 0 && oy === 0 ? 4 : 1;
+            sum += current[(py * width + px) * 4 + 3] * w;
+            weight += w;
+          }
+        }
+        const offset = (y * width + x) * 4 + 3;
+        const original = source[offset];
+        const blurred = sum / weight;
+        data[offset] = Math.round(original > 248 ? original : blurred);
+      }
+    }
+  }
+  return imageData;
+}
+
+function applyAlphaOffset(imageData, offset) {
+  offset = Math.round(offset);
+  if (!offset) return imageData;
+  const { width, height, data } = imageData;
+  const mask = new Uint8Array(width * height);
+  for (let index = 0; index < mask.length; index += 1) mask[index] = data[index * 4 + 3] > 16 ? 1 : 0;
+  const next = offset > 0 ? dilateMask(mask, width, height, Math.abs(offset)) : erodeMask(mask, width, height, Math.abs(offset));
+  for (let index = 0; index < mask.length; index += 1) {
+    if (!next[index]) data[index * 4 + 3] = 0;
+    else if (offset > 0 && !mask[index]) data[index * 4 + 3] = Math.max(data[index * 4 + 3], 32);
+  }
+  return imageData;
+}
+
+function erodeMask(mask, width, height, radius) {
+  const inverse = new Uint8Array(mask.length);
+  for (let index = 0; index < mask.length; index += 1) inverse[index] = mask[index] ? 0 : 1;
+  const grownBackground = dilateMask(inverse, width, height, radius);
+  const output = new Uint8Array(mask.length);
+  for (let index = 0; index < mask.length; index += 1) output[index] = grownBackground[index] ? 0 : mask[index];
+  return output;
+}
+
+function despeckleAlpha(imageData, threshold) {
+  const { width, height, data } = imageData;
+  const source = new Uint8ClampedArray(data);
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const offset = (y * width + x) * 4 + 3;
+      if (source[offset] === 0 || source[offset] > threshold + 18) continue;
+      let neighbors = 0;
+      for (let oy = -1; oy <= 1; oy += 1) {
+        for (let ox = -1; ox <= 1; ox += 1) {
+          if (ox || oy) neighbors += source[((y + oy) * width + x + ox) * 4 + 3] > threshold ? 1 : 0;
+        }
+      }
+      if (neighbors <= 1) data[offset] = 0;
+    }
+  }
+}
+
+function defringe(imageData) {
+  const { width, height, data } = imageData;
+  const source = new Uint8ClampedArray(data);
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const offset = (y * width + x) * 4;
+      const alpha = source[offset + 3];
+      if (alpha === 0 || alpha > 235) continue;
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let count = 0;
+      for (let oy = -1; oy <= 1; oy += 1) {
+        for (let ox = -1; ox <= 1; ox += 1) {
+          const next = ((y + oy) * width + x + ox) * 4;
+          if (source[next + 3] <= 220) continue;
+          r += source[next];
+          g += source[next + 1];
+          b += source[next + 2];
+          count += 1;
+        }
+      }
+      if (count) {
+        data[offset] = Math.round(r / count);
+        data[offset + 1] = Math.round(g / count);
+        data[offset + 2] = Math.round(b / count);
+      }
+    }
+  }
 }
 
 function createDetectionImageData(sourceCanvas, maxEdge = 1024) {
@@ -1391,7 +1704,8 @@ function renderCards() {
 
     const meta = document.createElement("div");
     meta.className = "meta";
-    meta.innerHTML = `<strong>元素 ${String(component.id).padStart(2, "0")}</strong><span>${component.width} x ${component.height}</span>`;
+    const size = getExportSize(component);
+    meta.innerHTML = `<strong>元素 ${String(component.id).padStart(2, "0")}</strong><span>${component.width} x ${component.height} @${size.scale}x -> ${size.width} x ${size.height}</span>`;
 
     const checkbox = document.createElement("label");
     checkbox.className = "asset-check";
@@ -1457,17 +1771,26 @@ function queueThumbnail(img, component) {
   }
 }
 
-function cropToCanvas(box) {
+function cropToCanvas(box, scale = 1) {
+  const source = state.refinedCutoutCanvas.width ? state.refinedCutoutCanvas : els.resultCanvas;
+  const ratioX = source.width / Math.max(1, els.resultCanvas.width);
+  const ratioY = source.height / Math.max(1, els.resultCanvas.height);
+  const sx = Math.round(box.x * ratioX);
+  const sy = Math.round(box.y * ratioY);
+  const sw = Math.max(1, Math.round(box.width * ratioX));
+  const sh = Math.max(1, Math.round(box.height * ratioY));
   const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(box.width));
-  canvas.height = Math.max(1, Math.round(box.height));
+  canvas.width = Math.max(1, Math.round(sw * scale));
+  canvas.height = Math.max(1, Math.round(sh * scale));
   const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
   ctx.drawImage(
-    els.resultCanvas,
-    Math.round(box.x),
-    Math.round(box.y),
-    canvas.width,
-    canvas.height,
+    source,
+    sx,
+    sy,
+    sw,
+    sh,
     0,
     0,
     canvas.width,
@@ -1486,21 +1809,36 @@ function cropToCanvas(box) {
 }
 
 function cropToDataUrl(box) {
-  return cropToCanvas(box).toDataURL("image/png");
+  const ratioX = (state.refinedCutoutCanvas.width || els.resultCanvas.width) / Math.max(1, els.resultCanvas.width);
+  const ratioY = (state.refinedCutoutCanvas.height || els.resultCanvas.height) / Math.max(1, els.resultCanvas.height);
+  const maxExportEdge = Math.max(box.width * ratioX, box.height * ratioY);
+  const scale = Math.min(1, 260 / Math.max(1, maxExportEdge));
+  return cropToCanvas(box, scale).toDataURL("image/png");
+}
+
+function getExportSize(box) {
+  const source = state.refinedCutoutCanvas.width ? state.refinedCutoutCanvas : els.resultCanvas;
+  const ratioX = source.width / Math.max(1, els.resultCanvas.width);
+  const ratioY = source.height / Math.max(1, els.resultCanvas.height);
+  const scale = getExportScale();
+  return {
+    scale,
+    width: Math.round(box.width * ratioX * scale),
+    height: Math.round(box.height * ratioY * scale),
+  };
 }
 
 async function downloadComponent(component) {
   const { ext } = getExportSettings();
   const fileName = `${state.imageName}-element-${String(component.id).padStart(2, "0")}.${ext}`;
-  const blob = await canvasToExportBlob(cropToCanvas(component));
+  const blob = await canvasToExportBlob(cropToCanvas(component, getExportScale()));
   downloadBlob(blob, fileName);
 }
 
 async function downloadCutout() {
   if (!state.cutoutBlob) return;
   const { ext } = getExportSettings();
-  const sourceBlob = state.currentItem?.filteredCutoutBlob || state.cutoutBlob;
-  const blob = await blobToExportBlob(sourceBlob);
+  const blob = await canvasToExportBlob(scaleCanvasForExport(state.refinedCutoutCanvas, getExportScale()));
   downloadBlob(blob, `${state.imageName}-cutout.${ext}`);
 }
 
@@ -1511,7 +1849,7 @@ async function downloadZip() {
   const { ext } = getExportSettings();
 
   for (const component of state.components) {
-    const blob = await canvasToExportBlob(cropToCanvas(component));
+    const blob = await canvasToExportBlob(cropToCanvas(component, getExportScale()));
     const fileName = `${state.imageName}-element-${String(component.id).padStart(2, "0")}.${ext}`;
     zip.file(fileName, blob);
   }
@@ -1530,7 +1868,7 @@ async function downloadSelectedZip() {
   const { ext } = getExportSettings();
 
   for (const component of selected) {
-    const blob = await canvasToExportBlob(cropToCanvas(component));
+    const blob = await canvasToExportBlob(cropToCanvas(component, getExportScale()));
     const fileName = `${state.imageName}-element-${String(component.id).padStart(2, "0")}.${ext}`;
     zip.file(fileName, blob);
   }
@@ -1634,18 +1972,28 @@ async function downloadBatchZip() {
 }
 
 async function cropItemComponentToExportBlob(item, box) {
-  const bitmap = await createImageBitmap(item.cutoutBlob);
+  if (item === state.currentItem) return canvasToExportBlob(cropToCanvas(box, getExportScale()));
+  const bitmap = await createImageBitmap(item.filteredCutoutBlob || item.cutoutBlob);
   const source = document.createElement("canvas");
-  source.width = item.resultWidth || bitmap.width;
-  source.height = item.resultHeight || bitmap.height;
+  source.width = bitmap.width;
+  source.height = bitmap.height;
   const sourceCtx = source.getContext("2d");
   sourceCtx.drawImage(bitmap, 0, 0, source.width, source.height);
+  const ratioX = source.width / Math.max(1, item.previewWidth || source.width);
+  const ratioY = source.height / Math.max(1, item.previewHeight || source.height);
+  const sx = Math.round(box.x * ratioX);
+  const sy = Math.round(box.y * ratioY);
+  const sw = Math.max(1, Math.round(box.width * ratioX));
+  const sh = Math.max(1, Math.round(box.height * ratioY));
+  const scale = getExportScale();
 
   const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(box.width));
-  canvas.height = Math.max(1, Math.round(box.height));
+  canvas.width = Math.max(1, Math.round(sw * scale));
+  canvas.height = Math.max(1, Math.round(sh * scale));
   const ctx = canvas.getContext("2d");
-  ctx.drawImage(source, Math.round(box.x), Math.round(box.y), canvas.width, canvas.height, 0, 0, canvas.width, canvas.height);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(source, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
   if (box.mask) {
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     for (let index = 0; index < box.mask.length; index += 1) {
@@ -1664,6 +2012,7 @@ function toggleManualMode() {
   els.overlayCanvas.closest(".checker").classList.toggle("manual", state.manual);
   state.selection = null;
   els.exportSelectionBtn.disabled = true;
+  updateManualPreview();
   drawOverlay();
   updateUiState();
 }
@@ -1674,14 +2023,16 @@ function startSelection(event) {
   const point = eventToCanvasPoint(event);
   state.dragStart = point;
   state.selection = { x: point.x, y: point.y, width: 0, height: 0 };
+  updateManualPreview();
   drawOverlay();
 }
 
 function moveSelection(event) {
   if (!state.dragStart || !state.manual) return;
   const point = eventToCanvasPoint(event);
-  state.selection = normalizeBox(state.dragStart, point);
+  state.selection = applyAspectLock(normalizeBox(state.dragStart, point));
   els.exportSelectionBtn.disabled = state.selection.width < 4 || state.selection.height < 4;
+  updateManualPreview();
   drawOverlay();
 }
 
@@ -1703,8 +2054,68 @@ async function exportSelection() {
     height: Math.round(state.selection.height),
   };
   const { ext } = getExportSettings();
-  const blob = await canvasToExportBlob(cropToCanvas(box));
+  const blob = await canvasToExportBlob(cropToCanvas(box, getExportScale()));
   downloadBlob(blob, `${state.imageName}-manual-slice.${ext}`);
+}
+
+function updateManualPreview() {
+  const scale = getExportScale();
+  if (!state.selection || state.selection.width < 4 || state.selection.height < 4) {
+    els.manualReadout.textContent = "当前框选：未选择";
+    els.manualPreviewCanvas.width = 0;
+    els.manualPreviewCanvas.height = 0;
+    return;
+  }
+  const box = {
+    ...state.selection,
+    x: Math.round(state.selection.x),
+    y: Math.round(state.selection.y),
+    width: Math.round(state.selection.width),
+    height: Math.round(state.selection.height),
+  };
+  const preview = cropToCanvas(box, 1);
+  const maxEdge = 180;
+  const previewScale = Math.min(1, maxEdge / Math.max(preview.width, preview.height));
+  els.manualPreviewCanvas.width = Math.max(1, Math.round(preview.width * previewScale));
+  els.manualPreviewCanvas.height = Math.max(1, Math.round(preview.height * previewScale));
+  const ctx = els.manualPreviewCanvas.getContext("2d");
+  ctx.clearRect(0, 0, els.manualPreviewCanvas.width, els.manualPreviewCanvas.height);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(preview, 0, 0, els.manualPreviewCanvas.width, els.manualPreviewCanvas.height);
+  const size = getExportSize(box);
+  els.manualReadout.textContent = `当前框选：${box.width} x ${box.height}；${scale}x 导出：${size.width} x ${size.height}`;
+}
+
+function applyAspectLock(box) {
+  const value = els.aspectLock.value;
+  if (value === "free") return box;
+  const [w, h] = value.split(":").map(Number);
+  if (!w || !h) return box;
+  const ratio = w / h;
+  const width = box.width;
+  const height = Math.round(width / ratio);
+  return {
+    ...box,
+    height,
+  };
+}
+
+function handleSelectionKeys(event) {
+  if (!state.manual || !state.selection) return;
+  const step = event.shiftKey ? 10 : 1;
+  const keys = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Escape"]);
+  if (!keys.has(event.key)) return;
+  event.preventDefault();
+  if (event.key === "Escape") {
+    state.selection = null;
+    els.exportSelectionBtn.disabled = true;
+  } else if (event.key === "ArrowUp") state.selection.y = Math.max(0, state.selection.y - step);
+  else if (event.key === "ArrowDown") state.selection.y = Math.min(els.overlayCanvas.height - state.selection.height, state.selection.y + step);
+  else if (event.key === "ArrowLeft") state.selection.x = Math.max(0, state.selection.x - step);
+  else if (event.key === "ArrowRight") state.selection.x = Math.min(els.overlayCanvas.width - state.selection.width, state.selection.x + step);
+  updateManualPreview();
+  drawOverlay();
 }
 
 function eventToCanvasPoint(event) {
@@ -1762,13 +2173,23 @@ function sizeOverlay() {
   els.overlayCanvas.height = els.resultCanvas.height || els.sourceCanvas.height || 1;
 }
 
-function drawBitmapToCanvas(bitmap, canvas, ctx) {
-  const maxEdge = 1800;
-  const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
+function drawBitmapToCanvas(bitmap, canvas, ctx, maxEdge = 1800) {
+  const scale = Number.isFinite(maxEdge) ? Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height)) : 1;
   canvas.width = Math.max(1, Math.round(bitmap.width * scale));
   canvas.height = Math.max(1, Math.round(bitmap.height * scale));
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+}
+
+function drawCanvasToPreview(sourceCanvas, canvas, ctx) {
+  const maxEdge = 1800;
+  const scale = Math.min(1, maxEdge / Math.max(sourceCanvas.width, sourceCanvas.height));
+  canvas.width = Math.max(1, Math.round(sourceCanvas.width * scale));
+  canvas.height = Math.max(1, Math.round(sourceCanvas.height * scale));
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(sourceCanvas, 0, 0, canvas.width, canvas.height);
 }
 
 function setStatus(message, title = "状态") {
@@ -1871,16 +2292,29 @@ function canvasToBlob(canvas) {
   });
 }
 
-async function blobToExportBlob(blob) {
+async function blobToExportBlob(blob, scale = getExportScale()) {
   const { ext } = getExportSettings();
-  if (ext === "png") return blob;
+  if (ext === "png" && scale === 1) return blob;
   const bitmap = await createImageBitmap(blob);
   const canvas = document.createElement("canvas");
-  canvas.width = bitmap.width;
-  canvas.height = bitmap.height;
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
   const ctx = canvas.getContext("2d");
-  ctx.drawImage(bitmap, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
   return canvasToExportBlob(canvas);
+}
+
+function scaleCanvasForExport(sourceCanvas, scale = 1) {
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(sourceCanvas.width * scale));
+  canvas.height = Math.max(1, Math.round(sourceCanvas.height * scale));
+  const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(sourceCanvas, 0, 0, canvas.width, canvas.height);
+  return canvas;
 }
 
 function canvasToExportBlob(canvas) {
@@ -1896,7 +2330,7 @@ function canvasToExportBlob(canvas) {
         else reject(new Error(`${label} 导出失败`));
       },
       mime,
-      0.95,
+      ext === "webp" ? 0.98 : 0.95,
     );
   });
 }
