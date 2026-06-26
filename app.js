@@ -17,6 +17,7 @@ const els = {
   minArea: document.querySelector("#minArea"),
   padding: document.querySelector("#padding"),
   includeText: document.querySelector("#includeText"),
+  showBoxes: document.querySelector("#showBoxes"),
   alphaOut: document.querySelector("#alphaOut"),
   colorOut: document.querySelector("#colorOut"),
   areaOut: document.querySelector("#areaOut"),
@@ -66,6 +67,7 @@ const state = {
   scanQueued: false,
   scanTimer: 0,
   visibleComponentLimit: 30,
+  minAreaTouched: false,
   previewMode: "split",
   manual: false,
   dragStart: null,
@@ -103,6 +105,7 @@ function updateUiState() {
 
   els.sourceBadge.textContent = hasImage ? "已载入" : "待上传";
   els.resultBadge.textContent = hasResult ? "已去背景" : "待处理";
+  els.colorTolerance.disabled = els.detectMode.value !== "illustration";
   els.mobilePrimaryBtn.disabled = state.processing || (!hasImage && false);
   if (!hasImage) els.mobilePrimaryBtn.textContent = "选择图片开始";
   else if (!hasResult) els.mobilePrimaryBtn.textContent = "开始自动抠图";
@@ -169,16 +172,22 @@ function bindEvents() {
   }
 
   for (const input of [els.alphaThreshold, els.colorTolerance, els.minArea, els.padding]) {
-    input.addEventListener("input", syncOutputs);
-    input.addEventListener("change", () => {
+    input.addEventListener("input", () => {
+      if (input === els.minArea) state.minAreaTouched = true;
       syncOutputs();
-      scheduleScan(120);
+    });
+    input.addEventListener("change", () => {
+      if (input === els.minArea) state.minAreaTouched = true;
+      syncOutputs();
+      scheduleScan(350);
     });
   }
-  for (const input of [els.detectMode, els.includeText]) {
+  for (const input of [els.detectMode, els.includeText, els.showBoxes]) {
     input.addEventListener("change", () => {
       syncOutputs();
-      scheduleScan(80);
+      updateUiState();
+      if (input === els.showBoxes) drawOverlay();
+      else scheduleScan(300);
     });
   }
 
@@ -260,6 +269,17 @@ function syncOutputs() {
   els.padOut.value = els.padding.value;
 }
 
+function applyDynamicDefaults(width, height) {
+  if (state.minAreaTouched || !width || !height) return;
+  const dynamicMinArea = Math.round(Math.max(800, width * height * 0.001));
+  const max = Math.max(5000, Math.ceil(dynamicMinArea * 4 / 100) * 100);
+  els.minArea.max = String(max);
+  els.minArea.value = String(Math.min(max, dynamicMinArea));
+  els.alphaThreshold.value = "32";
+  els.padding.value = "12";
+  syncOutputs();
+}
+
 function scheduleScan(delay = 350) {
   if (!state.cutoutBlob) return;
   window.clearTimeout(state.scanTimer);
@@ -300,6 +320,7 @@ async function loadItem(item) {
   try {
     const bitmap = await createImageBitmap(item.file);
     drawBitmapToCanvas(bitmap, els.sourceCanvas, sourceCtx);
+    applyDynamicDefaults(els.sourceCanvas.width, els.sourceCanvas.height);
     sizeOverlay();
 
     if (item.cutoutBlob) {
@@ -563,13 +584,33 @@ async function scanAndRender() {
       fullImageData = resultCtx.getImageData(0, 0, els.resultCanvas.width, els.resultCanvas.height);
     }
 
-    const alphaThreshold = Number(els.alphaThreshold.value);
+    const alphaThreshold = Math.max(12, Number(els.alphaThreshold.value));
     const minArea = Number(els.minArea.value);
     const padding = Number(els.padding.value);
+    const mode = els.detectMode.value;
+    if (mode === "complete") {
+      state.components = [];
+      state.selectedComponentIds.clear();
+      state.visibleComponentLimit = 30;
+      drawOverlay();
+      renderCards();
+      els.downloadZipBtn.disabled = true;
+      updateSelectionButtons();
+      if (state.currentItem) {
+        state.currentItem.components = [];
+        state.currentItem.filteredCutoutBlob = els.includeText.checked ? state.cutoutBlob : await canvasToBlob(els.resultCanvas);
+        state.currentItem.message = "完整前景";
+        renderQueue();
+      }
+      setSuccess("已完成去背景。完整前景模式不会拆分元素或显示识别框。");
+      updateUiState();
+      return;
+    }
+
     const detection = createDetectionImageData(els.resultCanvas, 1024);
     const minAreaLow = Math.max(8, Math.round(minArea * detection.scale * detection.scale));
     const paddingLow = Math.max(1, Math.round(padding * detection.scale));
-    const useIllustrationMode = els.detectMode.value === "illustration";
+    const useIllustrationMode = mode === "illustration";
     const rawComponents = useIllustrationMode
       ? findIllustrationComponents(
           detection.imageData,
@@ -581,11 +622,14 @@ async function scanAndRender() {
         )
       : findSmartComponents(detection.imageData, alphaThreshold, minAreaLow, paddingLow);
     const mergedLow = postProcessComponents(rawComponents, detection.width, detection.height, minAreaLow, {
-      mergeDistance: useIllustrationMode ? 24 : 16,
-      absorbDistance: useIllustrationMode ? 28 : 20,
+      mergeDistance: mode === "subject" ? 10 : useIllustrationMode ? 22 : 16,
+      absorbDistance: mode === "subject" ? 14 : useIllustrationMode ? 26 : 20,
     });
     const beforeMergeCount = rawComponents.length;
-    state.components = mapComponentsToCanvas(mergedLow, detection, els.resultCanvas.width, els.resultCanvas.height, padding);
+    const qualityLow = addComponentQuality(mergedLow, detection.imageData, Math.max(16, alphaThreshold));
+    const validLow = filterBadComponents(qualityLow, detection.width, detection.height);
+    const chosenLow = mode === "subject" ? pickSubjectComponents(validLow, detection.width, detection.height) : validLow;
+    state.components = mapComponentsToCanvas(chosenLow, detection, els.resultCanvas.width, els.resultCanvas.height, padding);
 
     state.selectedComponentIds = new Set(state.components.map((component) => component.id));
     state.visibleComponentLimit = 30;
@@ -603,7 +647,9 @@ async function scanAndRender() {
       setStatus("识别到过多碎片，建议提高最小元素面积，或切换回智能元素切图。", "结果过碎");
     } else if (state.components.length) {
       const reduced = beforeMergeCount - state.components.length;
-      if (reduced >= Math.max(3, Math.round(beforeMergeCount * 0.25))) {
+      if (mode === "subject") {
+        setSuccess(`已按主体切图识别到 ${state.components.length} 个主要主体。`);
+      } else if (reduced >= Math.max(3, Math.round(beforeMergeCount * 0.25))) {
         setSuccess(`已自动合并相邻碎片，识别到 ${state.components.length} 个完整元素。`);
       } else {
         setSuccess(`已完成抠图，识别到 ${state.components.length} 个完整元素。`);
@@ -646,9 +692,17 @@ function createDetectionImageData(sourceCanvas, maxEdge = 1024) {
 
 function findSmartComponents(imageData, alphaThreshold, minArea, pad) {
   const radius = Math.max(3, Math.min(12, Math.round(Math.max(imageData.width, imageData.height) / 120)));
-  const alphaMask = createAlphaMask(imageData, alphaThreshold);
+  const alphaMask = cleanAlphaMask(imageData, alphaThreshold);
   const mergedMask = dilateMask(alphaMask, imageData.width, imageData.height, radius);
   return findComponentsFromMask(mergedMask, imageData.width, imageData.height, minArea, Math.max(pad, radius));
+}
+
+function cleanAlphaMask(imageData, alphaThreshold) {
+  const supportThreshold = Math.max(16, alphaThreshold);
+  const coreThreshold = Math.max(48, alphaThreshold + 16);
+  const supportMask = createAlphaMask(imageData, supportThreshold);
+  const coreMask = createAlphaMask(imageData, coreThreshold);
+  return growCoreIntoSupport(coreMask, supportMask, imageData.width, imageData.height);
 }
 
 function createAlphaMask(imageData, alphaThreshold) {
@@ -658,6 +712,31 @@ function createAlphaMask(imageData, alphaThreshold) {
     mask[index] = data[index * 4 + 3] > alphaThreshold ? 1 : 0;
   }
   return mask;
+}
+
+function growCoreIntoSupport(coreMask, supportMask, width, height) {
+  const output = new Uint8Array(coreMask.length);
+  const stack = [];
+  for (let index = 0; index < coreMask.length; index += 1) {
+    if (coreMask[index] && supportMask[index]) {
+      output[index] = 1;
+      stack.push(index);
+    }
+  }
+
+  while (stack.length) {
+    const index = stack.pop();
+    const px = index % width;
+    const neighbors = [index - 1, index + 1, index - width, index + width];
+    for (const next of neighbors) {
+      if (next < 0 || next >= supportMask.length || output[next] || !supportMask[next]) continue;
+      if ((next === index - 1 && px === 0) || (next === index + 1 && px === width - 1)) continue;
+      output[next] = 1;
+      stack.push(next);
+    }
+  }
+
+  return output;
 }
 
 function dilateMask(mask, width, height, radius) {
@@ -761,6 +840,94 @@ function postProcessComponents(components, imageWidth, imageHeight, minArea, opt
   return working
     .sort((a, b) => b.area - a.area)
     .map((component, index) => ({ ...component, id: index + 1 }));
+}
+
+function addComponentQuality(components, imageData, alphaThreshold) {
+  return components.map((component) => {
+    const metrics = measureComponent(component, imageData, alphaThreshold);
+    return {
+      ...component,
+      ...metrics,
+      score: scoreComponent({ ...component, ...metrics }, imageData.width, imageData.height),
+    };
+  });
+}
+
+function measureComponent(component, imageData, alphaThreshold) {
+  const { width, height, data } = imageData;
+  const startX = Math.max(0, Math.floor(component.x));
+  const startY = Math.max(0, Math.floor(component.y));
+  const endX = Math.min(width, Math.ceil(component.x + component.width));
+  const endY = Math.min(height, Math.ceil(component.y + component.height));
+  let alphaArea = 0;
+  let strongAlphaArea = 0;
+  for (let y = startY; y < endY; y += 1) {
+    for (let x = startX; x < endX; x += 1) {
+      const alpha = data[(y * width + x) * 4 + 3];
+      if (alpha >= alphaThreshold) alphaArea += 1;
+      if (alpha >= 96) strongAlphaArea += 1;
+    }
+  }
+  const boxArea = Math.max(1, (endX - startX) * (endY - startY));
+  return {
+    boxArea,
+    alphaArea,
+    strongAlphaArea,
+    alphaDensity: alphaArea / boxArea,
+    boxRatio: boxArea / Math.max(1, width * height),
+  };
+}
+
+function filterBadComponents(components, imageWidth, imageHeight) {
+  const imageArea = imageWidth * imageHeight;
+  return components.filter((component) => {
+    const aspect = component.width / Math.max(1, component.height);
+    const tooSparseHuge = component.boxRatio > 0.7 && component.alphaDensity < 0.18;
+    const mostlyEmpty = component.boxRatio > 0.25 && component.alphaDensity < 0.08;
+    const residualLine = (aspect > 8 || aspect < 0.125) && component.alphaDensity < 0.22;
+    const tinyNoise = component.alphaArea < imageArea * 0.0005;
+    return !tooSparseHuge && !mostlyEmpty && !residualLine && !tinyNoise;
+  });
+}
+
+function scoreComponent(component, imageWidth, imageHeight) {
+  const imageArea = imageWidth * imageHeight;
+  const areaRatio = component.alphaArea / Math.max(1, imageArea);
+  const boxRatio = component.boxRatio;
+  const density = component.alphaDensity;
+  const centerX = component.x + component.width / 2;
+  const centerY = component.y + component.height / 2;
+  const centerDistance = Math.hypot(centerX / imageWidth - 0.5, centerY / imageHeight - 0.5);
+  const aspect = component.width / Math.max(1, component.height);
+  const linePenalty = aspect > 5 || aspect < 0.2 ? 0.45 : 1;
+  const hugePenalty = boxRatio > 0.65 ? 0.38 : boxRatio > 0.45 ? 0.72 : 1;
+  const tinyPenalty = areaRatio < 0.006 ? 0.4 : areaRatio < 0.012 ? 0.68 : 1;
+  const centerBoost = 1 + Math.max(0, 0.5 - centerDistance) * 0.7;
+  const densityScore = Math.min(1.4, 0.25 + density * 2.8);
+  const sizeScore = Math.log1p(areaRatio * 120) / Math.log1p(120);
+  return sizeScore * densityScore * centerBoost * linePenalty * hugePenalty * tinyPenalty;
+}
+
+function pickSubjectComponents(components, imageWidth, imageHeight) {
+  const ranked = components
+    .map((component) => ({
+      ...component,
+      score: component.score ?? scoreComponent(component, imageWidth, imageHeight),
+    }))
+    .filter((component) => component.alphaDensity >= 0.06 && component.boxRatio < 0.82)
+    .sort((a, b) => b.score - a.score);
+  if (!ranked.length) return components.slice(0, 1);
+
+  const best = ranked[0];
+  const subjects = [best];
+  for (const candidate of ranked.slice(1)) {
+    if (subjects.length >= 3) break;
+    if (candidate.score < best.score * 0.62) continue;
+    if (candidate.alphaArea < best.alphaArea * 0.18) continue;
+    if (subjects.some((subject) => boxOverlapRatio(candidate, subject) > 0.35 || boxDistance(candidate, subject) < 8)) continue;
+    subjects.push(candidate);
+  }
+  return subjects;
 }
 
 function absorbTinyNearLarge(components, tinyLimit, distance) {
@@ -1190,7 +1357,9 @@ function renderCards() {
   if (!state.components.length) {
     const empty = document.createElement("div");
     empty.className = "empty-elements";
-    empty.innerHTML = state.cutoutBlob
+    empty.innerHTML = state.cutoutBlob && els.detectMode.value === "complete"
+      ? "<strong>完整前景模式</strong><span>当前只去背景，不拆分元素；可直接下载整张抠图。</span>"
+      : state.cutoutBlob
       ? "<strong>没有识别到独立元素</strong><span>可尝试调低最小元素面积，或切换为插画色块模式。</span>"
       : "<strong>等待处理结果</strong><span>处理完成后，拆分出的元素会显示在这里。</span>";
     els.elementGrid.append(empty);
@@ -1567,14 +1736,17 @@ function drawOverlay(highlightId = null) {
   overlayCtx.font = `${Math.max(14, Math.round(els.overlayCanvas.width / 60))}px sans-serif`;
   overlayCtx.textBaseline = "top";
 
-  for (const component of state.components) {
+  const shouldShowBoxes = els.showBoxes.checked || highlightId;
+  if (shouldShowBoxes) for (const component of state.components) {
     const isDimmed = highlightId && component.id !== highlightId;
-    overlayCtx.strokeStyle = isDimmed ? "rgba(52, 199, 134, 0.24)" : "#34C786";
-    overlayCtx.fillStyle = isDimmed ? "rgba(52, 199, 134, 0.04)" : "rgba(52, 199, 134, 0.14)";
-    overlayCtx.fillRect(component.x, component.y, component.width, component.height);
+    overlayCtx.strokeStyle = isDimmed ? "rgba(52, 199, 134, 0.18)" : "#34C786";
+    overlayCtx.fillStyle = isDimmed ? "rgba(52, 199, 134, 0)" : "rgba(52, 199, 134, 0.035)";
+    if (!isDimmed) overlayCtx.fillRect(component.x, component.y, component.width, component.height);
     overlayCtx.strokeRect(component.x, component.y, component.width, component.height);
-    overlayCtx.fillStyle = isDimmed ? "rgba(24, 37, 30, 0.35)" : "#12945a";
-    overlayCtx.fillText(`#${component.id}`, component.x + 6, component.y + 6);
+    if (!isDimmed) {
+      overlayCtx.fillStyle = "#12945a";
+      overlayCtx.fillText(`#${component.id}`, component.x + 6, component.y + 6);
+    }
   }
 
   if (state.selection) {

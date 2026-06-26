@@ -156,9 +156,10 @@
             <label>
               识别模式
               <select id="detectMode">
-                <option value="auto" selected>智能元素切图</option>
-                <option value="object">普通物体</option>
-                <option value="illustration">高级：插画色块</option>
+                <option value="complete">完整前景</option>
+                <option value="subject" selected>主体切图（推荐）</option>
+                <option value="split">元素拆分</option>
+                <option value="illustration">高级：色块拆分</option>
               </select>
             </label>
             <button id="processBtn" type="button" disabled>开始自动抠图</button>
@@ -166,9 +167,9 @@
             <details class="advanced">
               <summary>高级设置</summary>
               <label>
-                <span>透明阈值 <output id="alphaOut">16</output></span>
+                <span>透明阈值 <output id="alphaOut">32</output></span>
                 <small>边缘有残影时调高</small>
-                <input id="alphaThreshold" type="range" min="1" max="160" value="16" />
+                <input id="alphaThreshold" type="range" min="1" max="160" value="32" />
               </label>
               <label>
                 <span>色块容差 <output id="colorOut">48</output></span>
@@ -176,14 +177,21 @@
                 <input id="colorTolerance" type="range" min="12" max="120" value="48" />
               </label>
               <label>
-                <span>最小元素面积 <output id="areaOut">160</output></span>
+                <span>最小元素面积 <output id="areaOut">800</output></span>
                 <small>碎片太多时调高</small>
-                <input id="minArea" type="range" min="20" max="5000" step="20" value="160" />
+                <input id="minArea" type="range" min="20" max="5000" step="20" value="800" />
               </label>
               <label>
-                <span>导出留边 <output id="padOut">8</output></span>
+                <span>导出留边 <output id="padOut">12</output></span>
                 <small>给每个元素四周保留空白</small>
-                <input id="padding" type="range" min="0" max="80" value="8" />
+                <input id="padding" type="range" min="0" max="80" value="12" />
+              </label>
+              <label class="check-row">
+                <input id="showBoxes" type="checkbox" />
+                <span>
+                  显示识别框
+                  <small>查看抠图结果时可关闭框线</small>
+                </span>
               </label>
               <label class="check-row">
                 <input id="includeText" type="checkbox" />
