@@ -50,22 +50,22 @@
         </section>
       </header>
 
-      <section id="dropZone" class="dropzone">
-        <div class="drop-icon">+</div>
-        <div class="drop-copy">
-          <strong>拖入图片、粘贴截图，或点击选择文件</strong>
-          <span>支持批量上传；首次使用会自动下载模型，图片仅在本地处理。</span>
-          <div class="drop-tags" aria-label="特点">
-            <span>本地处理</span>
-            <span>批量导出</span>
-            <span>支持 SVG</span>
-          </div>
-        </div>
-        <div id="uploadFeedback" class="upload-feedback">等待图片输入</div>
-      </section>
-
       <section class="workspace">
         <aside class="panel">
+          <section id="dropZone" class="dropzone">
+            <div class="drop-icon">+</div>
+            <div class="drop-copy">
+              <strong>拖入图片、粘贴截图，或点击选择文件</strong>
+              <span>支持批量上传；首次使用会自动下载模型，图片仅在本地处理。</span>
+              <div class="drop-tags" aria-label="特点">
+                <span>本地处理</span>
+                <span>批量导出</span>
+                <span>支持 SVG</span>
+              </div>
+            </div>
+            <div id="uploadFeedback" class="upload-feedback">等待图片输入</div>
+          </section>
+
           <section class="panel-block queue-panel">
             <div class="panel-title">
               <h2>图片队列</h2>
@@ -73,7 +73,73 @@
             </div>
             <div id="queueList" class="queue-list"></div>
           </section>
+        </aside>
 
+        <section class="stage">
+          <div class="status-card" id="statusCard">
+            <div class="status-main">
+              <span class="status-dot"></span>
+              <div>
+                <strong id="statusTitle">准备开始</strong>
+                <p class="status" id="status">请选择一张图片。</p>
+              </div>
+            </div>
+            <div class="progress-wrap" id="progressWrap" hidden>
+              <div class="progress-bar">
+                <span id="progressFill"></span>
+              </div>
+              <output id="progressText">0%</output>
+            </div>
+          </div>
+
+          <div class="preview-head">
+            <div>
+              <h2>当前图片预览</h2>
+              <p>上传后可直接查看原图，处理完成后对比透明抠图结果。</p>
+            </div>
+            <div class="preview-tabs" role="group" aria-label="预览模式">
+              <button type="button" class="preview-toggle active" data-preview="split">并排对比</button>
+              <button type="button" class="preview-toggle" data-preview="result">只看结果</button>
+            </div>
+          </div>
+
+          <div class="canvases preview-split" id="previewArea">
+            <figure class="preview-card source-card">
+              <figcaption>
+                <strong>原图</strong>
+                <span id="sourceBadge">待上传</span>
+              </figcaption>
+              <canvas id="sourceCanvas"></canvas>
+            </figure>
+            <figure class="preview-card checker result-card">
+              <figcaption>
+                <strong>透明抠图</strong>
+                <span id="resultBadge">待处理</span>
+              </figcaption>
+              <button id="downloadCutoutBtn" type="button" class="preview-download ghost" disabled>下载整张抠图</button>
+              <canvas id="resultCanvas"></canvas>
+              <canvas id="overlayCanvas"></canvas>
+            </figure>
+          </div>
+
+          <section class="elements elements-muted">
+            <div class="section-title">
+              <div>
+                <h2>识别到的元素</h2>
+                <span id="countLabel">0 个</span>
+              </div>
+              <div class="element-actions">
+                <button id="selectAllBtn" type="button" class="ghost" disabled>全选</button>
+                <button id="clearSelectionBtn" type="button" class="ghost" disabled>取消选择</button>
+                <button id="downloadSelectedZipBtn" type="button" class="ghost" disabled>下载选中元素 ZIP</button>
+                <button id="downloadZipBtn" type="button" class="ghost" disabled>下载全部 ZIP</button>
+              </div>
+            </div>
+            <div id="elementGrid" class="element-grid"></div>
+          </section>
+        </section>
+
+        <aside class="action-panel">
           <section class="panel-block process-panel is-muted">
             <div class="panel-title">
               <h2>自动处理</h2>
@@ -97,7 +163,6 @@
             </label>
             <button id="processBtn" type="button" disabled>开始自动抠图</button>
             <button id="rescanBtn" type="button" class="ghost" disabled>重新识别元素</button>
-
             <details class="advanced">
               <summary>高级设置</summary>
               <label>
@@ -148,77 +213,20 @@
               <button type="button" class="format-segment" data-format="webp">WebP</button>
               <button type="button" class="format-segment" data-format="svg">SVG</button>
             </div>
-            <button id="downloadCutoutBtn" type="button" class="ghost" disabled>下载整张抠图</button>
-            <button id="downloadZipBtn" type="button" class="ghost" disabled>下载全部元素 ZIP</button>
-            <button id="downloadSelectedZipBtn" type="button" class="ghost" disabled>下载选中元素 ZIP</button>
+            <p class="export-hint">处理完成后可导出 PNG / WebP / SVG。</p>
             <button id="downloadBatchZipBtn" type="button" class="ghost" disabled>批量处理并下载 ZIP</button>
           </section>
 
           <section class="panel-block manual-panel is-muted">
             <div class="panel-title">
-              <h2>手动切片</h2>
-              <span>可选</span>
+              <h2>识别不准？</h2>
+              <span>补救操作</span>
             </div>
-            <p class="small">在预览图上拖拽框选，可把粘连元素单独导出。</p>
+            <p class="small">重新识别，或开启手动框选，把粘连元素单独切出。</p>
             <button id="manualModeBtn" type="button" class="ghost" disabled>开启框选</button>
             <button id="exportSelectionBtn" type="button" class="ghost" disabled>导出当前框选</button>
           </section>
         </aside>
-
-        <section class="stage">
-          <div class="status-card" id="statusCard">
-            <div class="status-main">
-              <span class="status-dot"></span>
-              <div>
-                <strong id="statusTitle">准备开始</strong>
-                <p class="status" id="status">请选择一张图片。</p>
-              </div>
-            </div>
-            <div class="progress-wrap" id="progressWrap" hidden>
-              <div class="progress-bar">
-                <span id="progressFill"></span>
-              </div>
-              <output id="progressText">0%</output>
-            </div>
-          </div>
-
-          <div class="preview-tabs" role="group" aria-label="预览模式">
-            <button type="button" class="preview-toggle active" data-preview="split">并排对比</button>
-            <button type="button" class="preview-toggle" data-preview="result">只看结果</button>
-          </div>
-
-          <div class="canvases preview-split" id="previewArea">
-            <figure class="preview-card source-card">
-              <figcaption>
-                <strong>原图</strong>
-                <span id="sourceBadge">待上传</span>
-              </figcaption>
-              <canvas id="sourceCanvas"></canvas>
-            </figure>
-            <figure class="preview-card checker result-card">
-              <figcaption>
-                <strong>透明抠图</strong>
-                <span id="resultBadge">待处理</span>
-              </figcaption>
-              <canvas id="resultCanvas"></canvas>
-              <canvas id="overlayCanvas"></canvas>
-            </figure>
-          </div>
-        </section>
-      </section>
-
-      <section class="elements elements-muted">
-        <div class="section-title">
-          <div>
-            <h2>元素资产</h2>
-            <span id="countLabel">0 个</span>
-          </div>
-          <div class="element-actions">
-            <button id="selectAllBtn" type="button" class="ghost" disabled>全选</button>
-            <button id="clearSelectionBtn" type="button" class="ghost" disabled>取消选择</button>
-          </div>
-        </div>
-        <div id="elementGrid" class="element-grid"></div>
       </section>
 
       <div class="mobile-action-bar">

@@ -85,6 +85,7 @@ function updateUiState() {
   els.appRoot.classList.toggle("app-empty", !hasImage);
   els.appRoot.classList.toggle("app-has-image", hasImage && !hasResult);
   els.appRoot.classList.toggle("app-done", hasResult);
+  els.appRoot.classList.toggle("app-manual", state.manual);
 
   document.querySelectorAll(".step").forEach((step) => step.classList.remove("active", "done"));
   const uploadStep = document.querySelector('[data-step="upload"]');
@@ -261,7 +262,7 @@ function getExportSettings() {
 function updateDownloadLabels() {
   const { label } = getExportSettings();
   els.downloadCutoutBtn.textContent = `下载整张抠图 ${label}`;
-  els.downloadZipBtn.textContent = `下载全部元素 ZIP`;
+  els.downloadZipBtn.textContent = "下载全部 ZIP";
   els.downloadBatchZipBtn.textContent = `批量处理并下载 ZIP`;
   for (const button of els.elementGrid.querySelectorAll("[data-download-element]")) {
     button.textContent = `下载 ${label}`;
@@ -365,6 +366,9 @@ function resetResult() {
   state.cutoutBlob = null;
   state.components = [];
   state.selection = null;
+  state.manual = false;
+  els.manualModeBtn.textContent = "开启框选";
+  els.overlayCanvas.closest(".checker")?.classList.remove("manual");
   els.resultCanvas.width = 0;
   els.resultCanvas.height = 0;
   els.overlayCanvas.width = 0;
@@ -563,7 +567,7 @@ async function scanAndRender() {
     renderQueue();
   }
   if (state.components.length) {
-    setSuccess(`已识别 ${state.components.length} 个元素，可单独下载或打包导出。`);
+    setSuccess(`已完成抠图，识别到 ${state.components.length} 个元素。`);
   } else {
     setStatus("没有识别到独立元素，可尝试调低最小面积，或切换为插画色块模式。", "未识别到元素");
   }
@@ -1174,6 +1178,7 @@ function toggleManualMode() {
   state.selection = null;
   els.exportSelectionBtn.disabled = true;
   drawOverlay();
+  updateUiState();
 }
 
 function startSelection(event) {
