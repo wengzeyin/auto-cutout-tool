@@ -2,6 +2,7 @@ import { removeBackground } from "https://cdn.jsdelivr.net/npm/@imgly/background
 import JSZip from "https://esm.sh/jszip@3.10.1";
 
 const els = {
+  appRoot: document.querySelector("#appRoot"),
   fileInput: document.querySelector("#fileInput"),
   dropZone: document.querySelector("#dropZone"),
   uploadFeedback: document.querySelector("#uploadFeedback"),
@@ -21,18 +22,32 @@ const els = {
   areaOut: document.querySelector("#areaOut"),
   padOut: document.querySelector("#padOut"),
   formatSelect: document.querySelector("#formatSelect"),
+  formatSegments: [...document.querySelectorAll(".format-segment")],
   processBtn: document.querySelector("#processBtn"),
   rescanBtn: document.querySelector("#rescanBtn"),
   downloadCutoutBtn: document.querySelector("#downloadCutoutBtn"),
   downloadZipBtn: document.querySelector("#downloadZipBtn"),
+  downloadSelectedZipBtn: document.querySelector("#downloadSelectedZipBtn"),
   downloadBatchZipBtn: document.querySelector("#downloadBatchZipBtn"),
   manualModeBtn: document.querySelector("#manualModeBtn"),
   exportSelectionBtn: document.querySelector("#exportSelectionBtn"),
   status: document.querySelector("#status"),
+  statusTitle: document.querySelector("#statusTitle"),
+  statusCard: document.querySelector("#statusCard"),
+  progressWrap: document.querySelector("#progressWrap"),
+  progressFill: document.querySelector("#progressFill"),
+  progressText: document.querySelector("#progressText"),
+  sourceBadge: document.querySelector("#sourceBadge"),
+  resultBadge: document.querySelector("#resultBadge"),
+  previewArea: document.querySelector("#previewArea"),
+  previewToggles: [...document.querySelectorAll(".preview-toggle")],
   countLabel: document.querySelector("#countLabel"),
   queueCount: document.querySelector("#queueCount"),
   queueList: document.querySelector("#queueList"),
   elementGrid: document.querySelector("#elementGrid"),
+  selectAllBtn: document.querySelector("#selectAllBtn"),
+  clearSelectionBtn: document.querySelector("#clearSelectionBtn"),
+  mobilePrimaryBtn: document.querySelector("#mobilePrimaryBtn"),
 };
 
 const state = {
@@ -45,6 +60,9 @@ const state = {
   nextItemId: 1,
   batchRunning: false,
   objectUrls: [],
+  selectedComponentIds: new Set(),
+  processing: false,
+  previewMode: "split",
   manual: false,
   dragStart: null,
   selection: null,
@@ -57,7 +75,60 @@ const overlayCtx = els.overlayCanvas.getContext("2d");
 syncOutputs();
 bindEvents();
 updateDownloadLabels();
+syncFormatSegments();
+updateUiState();
 renderQueue();
+
+function updateUiState() {
+  const hasImage = Boolean(state.currentItem);
+  const hasResult = Boolean(state.cutoutBlob);
+  els.appRoot.classList.toggle("app-empty", !hasImage);
+  els.appRoot.classList.toggle("app-has-image", hasImage && !hasResult);
+  els.appRoot.classList.toggle("app-done", hasResult);
+
+  document.querySelectorAll(".step").forEach((step) => step.classList.remove("active", "done"));
+  const uploadStep = document.querySelector('[data-step="upload"]');
+  const processStep = document.querySelector('[data-step="process"]');
+  const exportStep = document.querySelector('[data-step="export"]');
+  uploadStep?.classList.toggle("active", !hasImage);
+  uploadStep?.classList.toggle("done", hasImage);
+  processStep?.classList.toggle("active", hasImage && !hasResult);
+  processStep?.classList.toggle("done", hasResult);
+  exportStep?.classList.toggle("active", hasResult);
+
+  els.sourceBadge.textContent = hasImage ? "已载入" : "待上传";
+  els.resultBadge.textContent = hasResult ? "已去背景" : "待处理";
+  els.mobilePrimaryBtn.disabled = state.processing || (!hasImage && false);
+  if (!hasImage) els.mobilePrimaryBtn.textContent = "选择图片开始";
+  else if (!hasResult) els.mobilePrimaryBtn.textContent = "开始自动抠图";
+  else els.mobilePrimaryBtn.textContent = `导出 ${getExportSettings().label}`;
+}
+
+function setPreviewMode(mode) {
+  state.previewMode = mode === "result" ? "result" : "split";
+  els.previewArea.classList.toggle("preview-result", state.previewMode === "result");
+  els.previewArea.classList.toggle("preview-split", state.previewMode !== "result");
+  for (const toggle of els.previewToggles) {
+    toggle.classList.toggle("active", toggle.dataset.preview === state.previewMode);
+  }
+}
+
+function syncFormatSegments() {
+  const { ext } = getExportSettings();
+  for (const segment of els.formatSegments) {
+    segment.classList.toggle("active", segment.dataset.format === ext);
+  }
+}
+
+function handleMobilePrimary() {
+  if (!state.currentItem) {
+    els.fileInput.click();
+  } else if (!state.cutoutBlob) {
+    processImage();
+  } else {
+    downloadZip();
+  }
+}
 
 function bindEvents() {
   els.fileInput.addEventListener("change", () => {
@@ -70,13 +141,27 @@ function bindEvents() {
   els.rescanBtn.addEventListener("click", scanAndRender);
   els.downloadCutoutBtn.addEventListener("click", downloadCutout);
   els.downloadZipBtn.addEventListener("click", downloadZip);
+  els.downloadSelectedZipBtn.addEventListener("click", downloadSelectedZip);
   els.downloadBatchZipBtn.addEventListener("click", downloadBatchZip);
   els.manualModeBtn.addEventListener("click", toggleManualMode);
   els.exportSelectionBtn.addEventListener("click", exportSelection);
+  els.selectAllBtn.addEventListener("click", selectAllComponents);
+  els.clearSelectionBtn.addEventListener("click", clearComponentSelection);
+  els.mobilePrimaryBtn.addEventListener("click", handleMobilePrimary);
   els.formatSelect.addEventListener("change", () => {
     updateDownloadLabels();
+    syncFormatSegments();
     renderCards();
   });
+  for (const segment of els.formatSegments) {
+    segment.addEventListener("click", () => {
+      els.formatSelect.value = segment.dataset.format;
+      els.formatSelect.dispatchEvent(new Event("change"));
+    });
+  }
+  for (const toggle of els.previewToggles) {
+    toggle.addEventListener("click", () => setPreviewMode(toggle.dataset.preview));
+  }
 
   for (const input of [els.detectMode, els.alphaThreshold, els.colorTolerance, els.minArea, els.padding, els.includeText]) {
     input.addEventListener("input", () => {
@@ -147,6 +232,7 @@ async function addFiles(files, source) {
   state.queue.push(...items);
   renderQueue();
   setUploadFeedback(`${source}成功：已加入 ${items.length} 张图片${skipped ? `，跳过 ${skipped} 个非图片文件` : ""}。`, "ok");
+  updateUiState();
 
   if (!state.currentItem) {
     await loadItem(items[0]);
@@ -175,9 +261,12 @@ function getExportSettings() {
 function updateDownloadLabels() {
   const { label } = getExportSettings();
   els.downloadCutoutBtn.textContent = `下载整张抠图 ${label}`;
+  els.downloadZipBtn.textContent = `下载全部元素 ZIP`;
+  els.downloadBatchZipBtn.textContent = `批量处理并下载 ZIP`;
   for (const button of els.elementGrid.querySelectorAll("[data-download-element]")) {
     button.textContent = `下载 ${label}`;
   }
+  updateSelectionButtons();
 }
 
 async function loadItem(item) {
@@ -211,6 +300,7 @@ async function loadItem(item) {
     setStatus(`已载入 ${item.originalName}，可以开始处理。`);
     updateBatchButton();
     renderQueue();
+    updateUiState();
   } catch (error) {
     console.error(error);
     state.file = null;
@@ -220,6 +310,7 @@ async function loadItem(item) {
     els.processBtn.disabled = true;
     setError("图片读取失败，请换成 JPG、PNG 或 WebP。");
     renderQueue();
+    updateUiState();
   }
 }
 
@@ -286,6 +377,8 @@ function resetResult() {
   els.exportSelectionBtn.disabled = true;
   updateBatchButton();
   renderCards();
+  hideProgress();
+  updateUiState();
 }
 
 function resetSourceCanvas() {
@@ -348,6 +441,7 @@ async function removeQueueItem(item) {
 
   renderQueue();
   updateBatchButton();
+  updateUiState();
   if (state.queue.length) {
     setUploadFeedback(`已删除 ${item.originalName}，队列剩余 ${state.queue.length} 张。`, "ok");
   }
@@ -367,7 +461,9 @@ function setUploadFeedback(message, tone = "") {
 async function processImage(options = {}) {
   if (!state.file) return;
   const item = state.currentItem;
+  state.processing = true;
   setBusy(true, options.message || "首次处理会下载约几十 MB 的模型，请稍等...");
+  setProgress(0, "0%");
   state.components = [];
   if (item) {
     item.status = "processing";
@@ -385,6 +481,7 @@ async function processImage(options = {}) {
         if (total) {
           const percent = Math.round((current / total) * 100);
           setBusy(true, `正在下载/加载 ${key}：${percent}%`);
+          setProgress(percent, `${percent}%`);
         }
       },
     });
@@ -418,7 +515,10 @@ async function processImage(options = {}) {
     }
     setError(`处理失败：${error?.message || "请检查网络或换一张图片再试"}`);
   } finally {
+    state.processing = false;
     setBusy(false);
+    hideProgress();
+    updateUiState();
   }
 }
 
@@ -451,16 +551,23 @@ async function scanAndRender() {
       )
     : findComponents(imageData, alphaThreshold, minArea, padding, els.includeText.checked);
 
+  state.selectedComponentIds = new Set(state.components.map((component) => component.id));
   drawOverlay();
   renderCards();
   els.downloadZipBtn.disabled = state.components.length === 0;
+  updateSelectionButtons();
   if (state.currentItem) {
     state.currentItem.components = [...state.components];
     state.currentItem.filteredCutoutBlob = els.includeText.checked ? state.cutoutBlob : await canvasToBlob(els.resultCanvas);
     state.currentItem.message = state.cutoutBlob ? `${state.components.length} 个元素` : state.currentItem.message;
     renderQueue();
   }
-  setStatus(`识别到 ${state.components.length} 个可导出的元素（${useIllustrationMode ? "插画色块" : "普通物体"}）。`);
+  if (state.components.length) {
+    setSuccess(`已识别 ${state.components.length} 个元素，可单独下载或打包导出。`);
+  } else {
+    setStatus("没有识别到独立元素，可尝试调低最小面积，或切换为插画色块模式。", "未识别到元素");
+  }
+  updateUiState();
 }
 
 async function redrawCutoutCanvas() {
@@ -796,16 +903,20 @@ function renderCards() {
   els.elementGrid.innerHTML = "";
 
   if (!state.components.length) {
-    const empty = document.createElement("p");
-    empty.className = "small";
-    empty.textContent = state.cutoutBlob ? "没有识别到元素，可调低阈值或最小面积。" : "处理后会在这里显示元素。";
+    const empty = document.createElement("div");
+    empty.className = "empty-elements";
+    empty.innerHTML = state.cutoutBlob
+      ? "<strong>没有识别到独立元素</strong><span>可尝试调低最小元素面积，或切换为插画色块模式。</span>"
+      : "<strong>等待处理结果</strong><span>处理完成后，拆分出的元素会显示在这里。</span>";
     els.elementGrid.append(empty);
+    updateSelectionButtons();
     return;
   }
 
   for (const component of state.components) {
     const card = document.createElement("article");
-    card.className = "element-card";
+    const selected = state.selectedComponentIds.has(component.id);
+    card.className = `element-card${selected ? " selected" : ""}`;
 
     const thumb = document.createElement("div");
     thumb.className = "thumb";
@@ -816,7 +927,17 @@ function renderCards() {
 
     const meta = document.createElement("div");
     meta.className = "meta";
-    meta.innerHTML = `<span>#${component.id}</span><span>${component.width} x ${component.height}</span>`;
+    meta.innerHTML = `<strong>元素 ${String(component.id).padStart(2, "0")}</strong><span>${component.width} x ${component.height}</span>`;
+
+    const checkbox = document.createElement("label");
+    checkbox.className = "asset-check";
+    checkbox.innerHTML = `<input type="checkbox" ${selected ? "checked" : ""} /> <span>选择导出</span>`;
+    checkbox.querySelector("input").addEventListener("change", (event) => {
+      if (event.target.checked) state.selectedComponentIds.add(component.id);
+      else state.selectedComponentIds.delete(component.id);
+      renderCards();
+      drawOverlay();
+    });
 
     const button = document.createElement("button");
     button.type = "button";
@@ -825,9 +946,27 @@ function renderCards() {
     button.textContent = `下载 ${getExportSettings().label}`;
     button.addEventListener("click", () => downloadComponent(component));
 
-    card.append(thumb, meta, button);
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "ghost danger-lite";
+    remove.textContent = "删除";
+    remove.addEventListener("click", () => removeComponent(component.id));
+
+    const actions = document.createElement("div");
+    actions.className = "asset-actions";
+    actions.append(button, remove);
+
+    card.addEventListener("mouseenter", () => {
+      drawOverlay(component.id);
+    });
+    card.addEventListener("mouseleave", () => {
+      drawOverlay();
+    });
+
+    card.append(thumb, meta, checkbox, actions);
     els.elementGrid.append(card);
   }
+  updateSelectionButtons();
 }
 
 function cropToCanvas(box) {
@@ -895,6 +1034,62 @@ async function downloadZip() {
   setStatus(`已打包 ${state.components.length} 个元素。`);
 }
 
+async function downloadSelectedZip() {
+  const selected = state.components.filter((component) => state.selectedComponentIds.has(component.id));
+  if (!selected.length) return;
+  setBusy(true, "正在打包选中元素 ZIP...");
+  const zip = new JSZip();
+  const { ext } = getExportSettings();
+
+  for (const component of selected) {
+    const blob = await canvasToExportBlob(cropToCanvas(component));
+    const fileName = `${state.imageName}-element-${String(component.id).padStart(2, "0")}.${ext}`;
+    zip.file(fileName, blob);
+  }
+
+  const zipBlob = await zip.generateAsync({ type: "blob" });
+  downloadBlob(zipBlob, `${state.imageName}-selected-elements.zip`);
+  setBusy(false);
+  setStatus(`已打包 ${selected.length} 个选中元素。`);
+}
+
+function selectAllComponents() {
+  state.selectedComponentIds = new Set(state.components.map((component) => component.id));
+  renderCards();
+  drawOverlay();
+}
+
+function clearComponentSelection() {
+  state.selectedComponentIds.clear();
+  renderCards();
+  drawOverlay();
+}
+
+function removeComponent(componentId) {
+  state.components = state.components.filter((component) => component.id !== componentId);
+  state.selectedComponentIds.delete(componentId);
+  if (state.currentItem) {
+    state.currentItem.components = [...state.components];
+    state.currentItem.message = `${state.components.length} 个元素`;
+  }
+  renderCards();
+  drawOverlay();
+  updateSelectionButtons();
+  els.downloadZipBtn.disabled = state.components.length === 0;
+  setStatus(state.components.length ? `已删除误识别元素，剩余 ${state.components.length} 个。` : "元素已清空，可重新识别或调整参数。");
+}
+
+function updateSelectionButtons() {
+  const hasComponents = state.components.length > 0;
+  const selectedCount = state.selectedComponentIds.size;
+  els.selectAllBtn.disabled = !hasComponents;
+  els.clearSelectionBtn.disabled = !hasComponents || selectedCount === 0;
+  els.downloadSelectedZipBtn.disabled = state.processing || selectedCount === 0;
+  els.downloadSelectedZipBtn.textContent = selectedCount
+    ? `下载选中 ${selectedCount} 个 ZIP`
+    : "下载选中元素 ZIP";
+}
+
 async function downloadBatchZip() {
   if (!state.queue.length || state.batchRunning) return;
   state.batchRunning = true;
@@ -905,9 +1100,11 @@ async function downloadBatchZip() {
     for (let index = 0; index < state.queue.length; index += 1) {
       const item = state.queue[index];
       if (item.status === "done" && item.cutoutBlob) continue;
+      setProgress(Math.round((index / total) * 100), `${index + 1} / ${total}`);
       await loadItem(item);
       await processImage({ message: `批量处理中：${index + 1}/${total} ${item.originalName}` });
     }
+    setProgress(100, `${total} / ${total}`);
 
     setBusy(true, "正在打包批量 ZIP...");
     const zip = new JSZip();
@@ -1039,7 +1236,7 @@ function normalizeBox(a, b) {
   };
 }
 
-function drawOverlay() {
+function drawOverlay(highlightId = null) {
   sizeOverlay();
   overlayCtx.clearRect(0, 0, els.overlayCanvas.width, els.overlayCanvas.height);
 
@@ -1048,17 +1245,18 @@ function drawOverlay() {
   overlayCtx.textBaseline = "top";
 
   for (const component of state.components) {
-    overlayCtx.strokeStyle = "#0f766e";
-    overlayCtx.fillStyle = "rgba(15, 118, 110, 0.12)";
+    const isDimmed = highlightId && component.id !== highlightId;
+    overlayCtx.strokeStyle = isDimmed ? "rgba(52, 199, 134, 0.24)" : "#34C786";
+    overlayCtx.fillStyle = isDimmed ? "rgba(52, 199, 134, 0.04)" : "rgba(52, 199, 134, 0.14)";
     overlayCtx.fillRect(component.x, component.y, component.width, component.height);
     overlayCtx.strokeRect(component.x, component.y, component.width, component.height);
-    overlayCtx.fillStyle = "#0b5f59";
+    overlayCtx.fillStyle = isDimmed ? "rgba(24, 37, 30, 0.35)" : "#12945a";
     overlayCtx.fillText(`#${component.id}`, component.x + 6, component.y + 6);
   }
 
   if (state.selection) {
-    overlayCtx.strokeStyle = "#b45309";
-    overlayCtx.fillStyle = "rgba(180, 83, 9, 0.14)";
+    overlayCtx.strokeStyle = "#111827";
+    overlayCtx.fillStyle = "rgba(17, 24, 39, 0.12)";
     overlayCtx.fillRect(state.selection.x, state.selection.y, state.selection.width, state.selection.height);
     overlayCtx.strokeRect(state.selection.x, state.selection.y, state.selection.width, state.selection.height);
   }
@@ -1078,27 +1276,56 @@ function drawBitmapToCanvas(bitmap, canvas, ctx) {
   ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
 }
 
-function setStatus(message) {
+function setStatus(message, title = "状态") {
+  els.statusTitle.textContent = title;
+  els.statusCard.className = "status-card";
   els.status.className = "status";
   els.status.textContent = message;
 }
 
 function setBusy(isBusy, message) {
   document.body.style.cursor = isBusy ? "progress" : "";
+  state.processing = isBusy;
   if (message) {
+    els.statusTitle.textContent = isBusy ? "正在处理" : "状态";
+    els.statusCard.className = `status-card${isBusy ? " busy" : ""}`;
     els.status.className = "status busy";
     els.status.textContent = message;
   }
+  els.processBtn.textContent = isBusy ? "处理中..." : "开始自动抠图";
   els.processBtn.disabled = isBusy || !state.file;
   els.rescanBtn.disabled = isBusy || !state.cutoutBlob;
   els.downloadCutoutBtn.disabled = isBusy || !state.cutoutBlob;
   els.downloadZipBtn.disabled = isBusy || !state.components.length;
   updateBatchButton();
+  updateSelectionButtons();
+  updateUiState();
 }
 
 function setError(message) {
+  els.statusTitle.textContent = "出现问题";
+  els.statusCard.className = "status-card error";
   els.status.className = "status error";
   els.status.textContent = message;
+}
+
+function setSuccess(message) {
+  els.statusTitle.textContent = "处理完成";
+  els.statusCard.className = "status-card success";
+  els.status.className = "status success";
+  els.status.textContent = message;
+}
+
+function setProgress(percent, label = `${percent}%`) {
+  els.progressWrap.hidden = false;
+  els.progressFill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+  els.progressText.value = label;
+}
+
+function hideProgress() {
+  els.progressWrap.hidden = true;
+  els.progressFill.style.width = "0%";
+  els.progressText.value = "0%";
 }
 
 function cleanName(fileName) {
