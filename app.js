@@ -62,6 +62,10 @@ const state = {
   objectUrls: [],
   selectedComponentIds: new Set(),
   processing: false,
+  scanning: false,
+  scanQueued: false,
+  scanTimer: 0,
+  visibleComponentLimit: 30,
   previewMode: "split",
   manual: false,
   dragStart: null,
@@ -164,10 +168,17 @@ function bindEvents() {
     toggle.addEventListener("click", () => setPreviewMode(toggle.dataset.preview));
   }
 
-  for (const input of [els.detectMode, els.alphaThreshold, els.colorTolerance, els.minArea, els.padding, els.includeText]) {
-    input.addEventListener("input", () => {
+  for (const input of [els.alphaThreshold, els.colorTolerance, els.minArea, els.padding]) {
+    input.addEventListener("input", syncOutputs);
+    input.addEventListener("change", () => {
       syncOutputs();
-      if (state.cutoutBlob) scanAndRender();
+      scheduleScan(120);
+    });
+  }
+  for (const input of [els.detectMode, els.includeText]) {
+    input.addEventListener("change", () => {
+      syncOutputs();
+      scheduleScan(80);
     });
   }
 
@@ -247,6 +258,14 @@ function syncOutputs() {
   els.colorOut.value = els.colorTolerance.value;
   els.areaOut.value = els.minArea.value;
   els.padOut.value = els.padding.value;
+}
+
+function scheduleScan(delay = 350) {
+  if (!state.cutoutBlob) return;
+  window.clearTimeout(state.scanTimer);
+  state.scanTimer = window.setTimeout(() => {
+    scanAndRender();
+  }, delay);
 }
 
 function getExportSettings() {
@@ -528,56 +547,328 @@ async function processImage(options = {}) {
 
 async function scanAndRender() {
   if (!state.cutoutBlob || !els.resultCanvas.width) return;
-  setStatus("正在识别独立元素...");
-  await redrawCutoutCanvas();
-  let imageData = resultCtx.getImageData(0, 0, els.resultCanvas.width, els.resultCanvas.height);
-  if (!els.includeText.checked) {
-    removeLikelyTextPixels(imageData);
-    resultCtx.putImageData(imageData, 0, 0);
-    imageData = resultCtx.getImageData(0, 0, els.resultCanvas.width, els.resultCanvas.height);
+  if (state.scanning) {
+    state.scanQueued = true;
+    return;
   }
 
-  const alphaThreshold = Number(els.alphaThreshold.value);
-  const minArea = Number(els.minArea.value);
-  const padding = Number(els.padding.value);
-  const useIllustrationMode =
-    els.detectMode.value === "illustration" ||
-    (els.detectMode.value === "auto" && looksLikeIllustration(imageData, alphaThreshold));
+  state.scanning = true;
+  try {
+    setStatus("正在识别完整元素...");
+    await redrawCutoutCanvas();
+    let fullImageData = resultCtx.getImageData(0, 0, els.resultCanvas.width, els.resultCanvas.height);
+    if (!els.includeText.checked) {
+      removeLikelyTextPixels(fullImageData);
+      resultCtx.putImageData(fullImageData, 0, 0);
+      fullImageData = resultCtx.getImageData(0, 0, els.resultCanvas.width, els.resultCanvas.height);
+    }
 
-  state.components = useIllustrationMode
-    ? findIllustrationComponents(
-        imageData,
-        alphaThreshold,
-        minArea,
-        padding,
-        els.includeText.checked,
-        Number(els.colorTolerance.value),
-      )
-    : findComponents(imageData, alphaThreshold, minArea, padding, els.includeText.checked);
+    const alphaThreshold = Number(els.alphaThreshold.value);
+    const minArea = Number(els.minArea.value);
+    const padding = Number(els.padding.value);
+    const detection = createDetectionImageData(els.resultCanvas, 1024);
+    const minAreaLow = Math.max(8, Math.round(minArea * detection.scale * detection.scale));
+    const paddingLow = Math.max(1, Math.round(padding * detection.scale));
+    const useIllustrationMode = els.detectMode.value === "illustration";
+    const rawComponents = useIllustrationMode
+      ? findIllustrationComponents(
+          detection.imageData,
+          alphaThreshold,
+          minAreaLow,
+          paddingLow,
+          els.includeText.checked,
+          Number(els.colorTolerance.value),
+        )
+      : findSmartComponents(detection.imageData, alphaThreshold, minAreaLow, paddingLow);
+    const mergedLow = postProcessComponents(rawComponents, detection.width, detection.height, minAreaLow, {
+      mergeDistance: useIllustrationMode ? 24 : 16,
+      absorbDistance: useIllustrationMode ? 28 : 20,
+    });
+    const beforeMergeCount = rawComponents.length;
+    state.components = mapComponentsToCanvas(mergedLow, detection, els.resultCanvas.width, els.resultCanvas.height, padding);
 
-  state.selectedComponentIds = new Set(state.components.map((component) => component.id));
-  drawOverlay();
-  renderCards();
-  els.downloadZipBtn.disabled = state.components.length === 0;
-  updateSelectionButtons();
-  if (state.currentItem) {
-    state.currentItem.components = [...state.components];
-    state.currentItem.filteredCutoutBlob = els.includeText.checked ? state.cutoutBlob : await canvasToBlob(els.resultCanvas);
-    state.currentItem.message = state.cutoutBlob ? `${state.components.length} 个元素` : state.currentItem.message;
-    renderQueue();
+    state.selectedComponentIds = new Set(state.components.map((component) => component.id));
+    state.visibleComponentLimit = 30;
+    drawOverlay();
+    renderCards();
+    els.downloadZipBtn.disabled = state.components.length === 0 || state.components.length > 50;
+    updateSelectionButtons();
+    if (state.currentItem) {
+      state.currentItem.components = [...state.components];
+      state.currentItem.filteredCutoutBlob = els.includeText.checked ? state.cutoutBlob : await canvasToBlob(els.resultCanvas);
+      state.currentItem.message = state.cutoutBlob ? `${state.components.length} 个元素` : state.currentItem.message;
+      renderQueue();
+    }
+    if (state.components.length > 50) {
+      setStatus("识别到过多碎片，建议提高最小元素面积，或切换回智能元素切图。", "结果过碎");
+    } else if (state.components.length) {
+      const reduced = beforeMergeCount - state.components.length;
+      if (reduced >= Math.max(3, Math.round(beforeMergeCount * 0.25))) {
+        setSuccess(`已自动合并相邻碎片，识别到 ${state.components.length} 个完整元素。`);
+      } else {
+        setSuccess(`已完成抠图，识别到 ${state.components.length} 个完整元素。`);
+      }
+    } else {
+      setStatus("没有识别到独立元素，可尝试调低最小元素面积，或切换为插画色块模式。", "未识别到元素");
+    }
+    updateUiState();
+  } finally {
+    state.scanning = false;
+    if (state.scanQueued) {
+      state.scanQueued = false;
+      scheduleScan(80);
+    }
   }
-  if (state.components.length) {
-    setSuccess(`已完成抠图，识别到 ${state.components.length} 个元素。`);
-  } else {
-    setStatus("没有识别到独立元素，可尝试调低最小面积，或切换为插画色块模式。", "未识别到元素");
-  }
-  updateUiState();
 }
 
 async function redrawCutoutCanvas() {
   const bitmap = await createImageBitmap(state.cutoutBlob);
   drawBitmapToCanvas(bitmap, els.resultCanvas, resultCtx);
   sizeOverlay();
+}
+
+function createDetectionImageData(sourceCanvas, maxEdge = 1024) {
+  const scale = Math.min(1, maxEdge / Math.max(sourceCanvas.width, sourceCanvas.height));
+  const width = Math.max(1, Math.round(sourceCanvas.width * scale));
+  const height = Math.max(1, Math.round(sourceCanvas.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(sourceCanvas, 0, 0, width, height);
+  return {
+    imageData: ctx.getImageData(0, 0, width, height),
+    width,
+    height,
+    scale,
+  };
+}
+
+function findSmartComponents(imageData, alphaThreshold, minArea, pad) {
+  const radius = Math.max(3, Math.min(12, Math.round(Math.max(imageData.width, imageData.height) / 120)));
+  const alphaMask = createAlphaMask(imageData, alphaThreshold);
+  const mergedMask = dilateMask(alphaMask, imageData.width, imageData.height, radius);
+  return findComponentsFromMask(mergedMask, imageData.width, imageData.height, minArea, Math.max(pad, radius));
+}
+
+function createAlphaMask(imageData, alphaThreshold) {
+  const { data, width, height } = imageData;
+  const mask = new Uint8Array(width * height);
+  for (let index = 0; index < mask.length; index += 1) {
+    mask[index] = data[index * 4 + 3] > alphaThreshold ? 1 : 0;
+  }
+  return mask;
+}
+
+function dilateMask(mask, width, height, radius) {
+  const horizontal = new Uint8Array(mask.length);
+  const output = new Uint8Array(mask.length);
+
+  for (let y = 0; y < height; y += 1) {
+    let sum = 0;
+    const row = y * width;
+    for (let x = -radius; x < width + radius; x += 1) {
+      const addX = x + radius;
+      if (addX >= 0 && addX < width) sum += mask[row + addX];
+      const removeX = x - radius - 1;
+      if (removeX >= 0 && removeX < width) sum -= mask[row + removeX];
+      if (x >= 0 && x < width) horizontal[row + x] = sum > 0 ? 1 : 0;
+    }
+  }
+
+  for (let x = 0; x < width; x += 1) {
+    let sum = 0;
+    for (let y = -radius; y < height + radius; y += 1) {
+      const addY = y + radius;
+      if (addY >= 0 && addY < height) sum += horizontal[addY * width + x];
+      const removeY = y - radius - 1;
+      if (removeY >= 0 && removeY < height) sum -= horizontal[removeY * width + x];
+      if (y >= 0 && y < height) output[y * width + x] = sum > 0 ? 1 : 0;
+    }
+  }
+
+  return output;
+}
+
+function findComponentsFromMask(mask, width, height, minArea, pad) {
+  const visited = new Uint8Array(mask.length);
+  const components = [];
+  const stack = [];
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const start = y * width + x;
+      if (visited[start] || !mask[start]) continue;
+
+      let minX = x;
+      let minY = y;
+      let maxX = x;
+      let maxY = y;
+      let area = 0;
+      visited[start] = 1;
+      stack.push(start);
+
+      while (stack.length) {
+        const index = stack.pop();
+        const px = index % width;
+        const py = Math.floor(index / width);
+        area += 1;
+        if (px < minX) minX = px;
+        if (px > maxX) maxX = px;
+        if (py < minY) minY = py;
+        if (py > maxY) maxY = py;
+
+        const neighbors = [index - 1, index + 1, index - width, index + width];
+        for (const next of neighbors) {
+          if (next < 0 || next >= mask.length || visited[next] || !mask[next]) continue;
+          if ((next === index - 1 && px === 0) || (next === index + 1 && px === width - 1)) continue;
+          visited[next] = 1;
+          stack.push(next);
+        }
+      }
+
+      if (area >= minArea) {
+        const box = padBox({ minX, minY, maxX, maxY }, pad, width, height);
+        components.push({
+          id: components.length + 1,
+          area,
+          x: box.minX,
+          y: box.minY,
+          width: box.maxX - box.minX + 1,
+          height: box.maxY - box.minY + 1,
+        });
+      }
+    }
+  }
+
+  return components;
+}
+
+function postProcessComponents(components, imageWidth, imageHeight, minArea, options = {}) {
+  const imageArea = imageWidth * imageHeight;
+  const tinyArea = Math.max(minArea, imageArea * 0.0005);
+  const mergeDistance = options.mergeDistance ?? 18;
+  const absorbDistance = options.absorbDistance ?? 22;
+  let working = components
+    .filter((component) => component.width > 1 && component.height > 1)
+    .filter((component) => component.area >= tinyArea || component.width * component.height >= tinyArea * 2)
+    .map((component) => ({ ...component, mask: undefined }));
+
+  working = absorbTinyNearLarge(working, tinyArea * 2.6, absorbDistance);
+  working = mergeBoxesUntilStable(working, mergeDistance);
+  working = mergeContainedOrOverlapping(working);
+
+  return working
+    .sort((a, b) => b.area - a.area)
+    .map((component, index) => ({ ...component, id: index + 1 }));
+}
+
+function absorbTinyNearLarge(components, tinyLimit, distance) {
+  const sorted = components.sort((a, b) => b.area - a.area);
+  const large = sorted.filter((component) => component.area >= tinyLimit);
+  const output = large.map((component) => ({ ...component }));
+
+  for (const component of sorted) {
+    if (component.area >= tinyLimit) continue;
+    const target = output
+      .map((candidate) => ({ candidate, distance: boxDistance(component, candidate) }))
+      .filter((entry) => entry.distance <= distance)
+      .sort((a, b) => a.distance - b.distance)[0]?.candidate;
+    if (target) mergeBoxInto(target, component);
+    else output.push({ ...component });
+  }
+
+  return output;
+}
+
+function mergeBoxesUntilStable(components, distance) {
+  let boxes = components.map((component) => ({ ...component }));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    outer: for (let i = 0; i < boxes.length; i += 1) {
+      for (let j = i + 1; j < boxes.length; j += 1) {
+        if (shouldMergeBoxes(boxes[i], boxes[j], distance)) {
+          mergeBoxInto(boxes[i], boxes[j]);
+          boxes.splice(j, 1);
+          changed = true;
+          break outer;
+        }
+      }
+    }
+  }
+  return boxes;
+}
+
+function mergeContainedOrOverlapping(components) {
+  const boxes = components.map((component) => ({ ...component }));
+  let index = 0;
+  while (index < boxes.length) {
+    const current = boxes[index];
+    const containerIndex = boxes.findIndex((candidate, candidateIndex) => {
+      if (candidateIndex === index) return false;
+      return boxOverlapRatio(current, candidate) > 0.68 || containsBox(candidate, current, 10);
+    });
+    if (containerIndex >= 0) {
+      mergeBoxInto(boxes[containerIndex], current);
+      boxes.splice(index, 1);
+    } else {
+      index += 1;
+    }
+  }
+  return boxes;
+}
+
+function shouldMergeBoxes(a, b, distance) {
+  if (boxDistance(a, b) <= distance) return true;
+  if (boxOverlapRatio(a, b) > 0.28) return true;
+  return containsBox(a, b, distance) || containsBox(b, a, distance);
+}
+
+function mergeBoxInto(target, source) {
+  const minX = Math.min(target.x, source.x);
+  const minY = Math.min(target.y, source.y);
+  const maxX = Math.max(target.x + target.width, source.x + source.width);
+  const maxY = Math.max(target.y + target.height, source.y + source.height);
+  target.x = minX;
+  target.y = minY;
+  target.width = maxX - minX;
+  target.height = maxY - minY;
+  target.area += source.area;
+}
+
+function boxDistance(a, b) {
+  const dx = Math.max(0, Math.max(a.x, b.x) - Math.min(a.x + a.width, b.x + b.width));
+  const dy = Math.max(0, Math.max(a.y, b.y) - Math.min(a.y + a.height, b.y + b.height));
+  return Math.hypot(dx, dy);
+}
+
+function containsBox(outer, inner, tolerance = 0) {
+  return (
+    inner.x >= outer.x - tolerance &&
+    inner.y >= outer.y - tolerance &&
+    inner.x + inner.width <= outer.x + outer.width + tolerance &&
+    inner.y + inner.height <= outer.y + outer.height + tolerance
+  );
+}
+
+function mapComponentsToCanvas(components, detection, targetWidth, targetHeight, pad) {
+  const scaleX = targetWidth / detection.width;
+  const scaleY = targetHeight / detection.height;
+  return components.map((component, index) => {
+    const x = Math.max(0, Math.floor(component.x * scaleX) - pad);
+    const y = Math.max(0, Math.floor(component.y * scaleY) - pad);
+    const maxX = Math.min(targetWidth, Math.ceil((component.x + component.width) * scaleX) + pad);
+    const maxY = Math.min(targetHeight, Math.ceil((component.y + component.height) * scaleY) + pad);
+    return {
+      id: index + 1,
+      area: Math.round(component.area / Math.max(0.0001, detection.scale * detection.scale)),
+      x,
+      y,
+      width: Math.max(1, maxX - x),
+      height: Math.max(1, maxY - y),
+    };
+  });
 }
 
 function removeLikelyTextPixels(imageData) {
@@ -841,10 +1132,6 @@ function looksLikeIllustration(imageData, alphaThreshold) {
 }
 
 function mergeSimilarBoxes(components, imageWidth, imageHeight, minArea) {
-  if (components.some((component) => component.mask)) {
-    return components;
-  }
-
   const sorted = components
     .filter((component) => component.width * component.height > 0)
     .sort((a, b) => b.area - a.area);
@@ -856,15 +1143,9 @@ function mergeSimilarBoxes(components, imageWidth, imageHeight, minArea) {
     const isTiny = component.area < Math.max(minArea, imageArea * 0.0007);
     const container = kept.find((candidate) => boxOverlapRatio(component, candidate) > (isTiny ? 0.62 : 0.82));
     if (container) {
-      container.x = Math.min(container.x, component.x);
-      container.y = Math.min(container.y, component.y);
-      const maxX = Math.max(container.x + container.width, component.x + component.width);
-      const maxY = Math.max(container.y + container.height, component.y + component.height);
-      container.width = maxX - container.x;
-      container.height = maxY - container.y;
-      container.area += component.area;
+      mergeBoxInto(container, component);
     } else if (!isTiny || boxArea > 900) {
-      kept.push({ ...component });
+      kept.push({ ...component, mask: undefined });
     }
   }
 
@@ -917,7 +1198,16 @@ function renderCards() {
     return;
   }
 
-  for (const component of state.components) {
+  const tooMany = state.components.length > 50;
+  if (tooMany) {
+    const warning = document.createElement("div");
+    warning.className = "empty-elements fragment-warning";
+    warning.innerHTML = "<strong>识别到过多碎片</strong><span>建议提高最小元素面积，或切换回智能元素切图后重新识别。当前只预览前 30 个元素。</span>";
+    els.elementGrid.append(warning);
+  }
+
+  const visibleComponents = state.components.slice(0, tooMany ? 30 : state.visibleComponentLimit);
+  for (const component of visibleComponents) {
     const card = document.createElement("article");
     const selected = state.selectedComponentIds.has(component.id);
     card.className = `element-card${selected ? " selected" : ""}`;
@@ -926,7 +1216,8 @@ function renderCards() {
     thumb.className = "thumb";
     const img = document.createElement("img");
     img.alt = `元素 ${component.id}`;
-    img.src = cropToDataUrl(component);
+    img.loading = "lazy";
+    queueThumbnail(img, component);
     thumb.append(img);
 
     const meta = document.createElement("div");
@@ -970,7 +1261,31 @@ function renderCards() {
     card.append(thumb, meta, checkbox, actions);
     els.elementGrid.append(card);
   }
+
+  if (!tooMany && state.visibleComponentLimit < state.components.length) {
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "ghost show-more";
+    more.textContent = `显示更多（剩余 ${state.components.length - state.visibleComponentLimit} 个）`;
+    more.addEventListener("click", () => {
+      state.visibleComponentLimit += 30;
+      renderCards();
+    });
+    els.elementGrid.append(more);
+  }
   updateSelectionButtons();
+}
+
+function queueThumbnail(img, component) {
+  const render = () => {
+    if (!img.isConnected) return;
+    img.src = cropToDataUrl(component);
+  };
+  if ("requestIdleCallback" in window) {
+    window.requestIdleCallback(render, { timeout: 800 });
+  } else {
+    window.setTimeout(render, 0);
+  }
 }
 
 function cropToCanvas(box) {
@@ -1079,19 +1394,22 @@ function removeComponent(componentId) {
   renderCards();
   drawOverlay();
   updateSelectionButtons();
-  els.downloadZipBtn.disabled = state.components.length === 0;
+  els.downloadZipBtn.disabled = state.components.length === 0 || state.components.length > 50;
   setStatus(state.components.length ? `已删除误识别元素，剩余 ${state.components.length} 个。` : "元素已清空，可重新识别或调整参数。");
 }
 
 function updateSelectionButtons() {
   const hasComponents = state.components.length > 0;
+  const tooMany = state.components.length > 50;
   const selectedCount = state.selectedComponentIds.size;
   els.selectAllBtn.disabled = !hasComponents;
   els.clearSelectionBtn.disabled = !hasComponents || selectedCount === 0;
-  els.downloadSelectedZipBtn.disabled = state.processing || selectedCount === 0;
-  els.downloadSelectedZipBtn.textContent = selectedCount
-    ? `下载选中 ${selectedCount} 个 ZIP`
-    : "下载选中元素 ZIP";
+  els.downloadSelectedZipBtn.disabled = state.processing || tooMany || selectedCount === 0;
+  els.downloadSelectedZipBtn.textContent = tooMany
+    ? "碎片过多，暂不打包"
+    : selectedCount
+      ? `下载选中 ${selectedCount} 个 ZIP`
+      : "下载选中元素 ZIP";
 }
 
 async function downloadBatchZip() {

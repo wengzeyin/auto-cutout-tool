@@ -748,6 +748,17 @@ canvas {
   color: var(--ink);
 }
 
+.fragment-warning {
+  min-height: 110px;
+  border-color: #f2c98d;
+  background: #fffbeb;
+}
+
+.show-more {
+  grid-column: 1 / -1;
+  justify-self: center;
+}
+
 .element-card {
   border: 1px solid var(--line);
   border-radius: 16px;
