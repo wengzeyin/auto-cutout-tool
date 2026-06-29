@@ -77,6 +77,8 @@ const state = {
   refinedCutoutCanvas: document.createElement("canvas"),
   processingToken: 0,
   refineTimer: 0,
+  refineWorker: null,
+  refineJobId: 0,
   alphaNormalized: false,
   components: [],
   queue: [],
@@ -684,6 +686,7 @@ async function processImage(options = {}) {
     }
   } catch (error) {
     console.error(error);
+    if (token !== state.processingToken || item !== state.currentItem) return;
     if (item) {
       item.status = "error";
       item.error = error;
@@ -692,10 +695,12 @@ async function processImage(options = {}) {
     }
     setError(`处理失败：${error?.message || "请检查网络或换一张图片再试"}`);
   } finally {
-    state.processing = false;
-    setBusy(false);
-    hideProgress();
-    updateUiState();
+    if (token === state.processingToken) {
+      state.processing = false;
+      setBusy(false);
+      hideProgress();
+      updateUiState();
+    }
   }
 }
 
@@ -809,7 +814,7 @@ async function redrawCutoutCanvas() {
 
 async function refineAndPreviewCutout({ immediateScan = true } = {}) {
   if (!state.cutoutOriginalCanvas.width) return;
-  const refineResult = refineCutoutAlpha(state.cutoutOriginalCanvas, getRefineSettings());
+  const refineResult = await refineCutoutAlphaAsync(state.cutoutOriginalCanvas, getRefineSettings());
   state.refinedCutoutCanvas = refineResult.canvas;
   state.alphaNormalized = refineResult.alphaNormalized;
   state.cutoutBlob = await canvasToBlob(state.refinedCutoutCanvas);
@@ -824,6 +829,50 @@ async function refineAndPreviewCutout({ immediateScan = true } = {}) {
   updateManualPreview();
   if (state.alphaNormalized) setStatus("已自动增强主体透明度。", "透明度已修复");
   if (immediateScan) scheduleScan(250);
+}
+
+async function refineCutoutAlphaAsync(sourceCanvas, settings) {
+  if (!window.Worker) return refineCutoutAlpha(sourceCanvas, settings);
+  try {
+    if (!state.refineWorker) {
+      state.refineWorker = new Worker(new URL("./matte-worker.js", import.meta.url), { type: "module" });
+    }
+    const ctx = sourceCanvas.getContext("2d", { willReadFrequently: true });
+    const imageData = ctx.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
+    const id = ++state.refineJobId;
+    const response = await new Promise((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        cleanup();
+        reject(new Error("matte worker timeout"));
+      }, 12000);
+      const cleanup = () => {
+        window.clearTimeout(timeout);
+        state.refineWorker.removeEventListener("message", handleMessage);
+        state.refineWorker.removeEventListener("error", handleError);
+      };
+      const handleMessage = (event) => {
+        if (event.data?.id !== id) return;
+        cleanup();
+        if (event.data.ok) resolve(event.data);
+        else reject(new Error(event.data.message || "matte worker failed"));
+      };
+      const handleError = (error) => {
+        cleanup();
+        reject(error);
+      };
+      state.refineWorker.addEventListener("message", handleMessage);
+      state.refineWorker.addEventListener("error", handleError);
+      state.refineWorker.postMessage({ id, imageData, settings }, [imageData.data.buffer]);
+    });
+    const canvas = document.createElement("canvas");
+    canvas.width = response.imageData.width;
+    canvas.height = response.imageData.height;
+    canvas.getContext("2d").putImageData(response.imageData, 0, 0);
+    return { canvas, alphaNormalized: response.alphaNormalized };
+  } catch (error) {
+    console.warn("Matte worker fallback:", error);
+    return refineCutoutAlpha(sourceCanvas, settings);
+  }
 }
 
 function refineCutoutAlpha(sourceCanvas, settings) {
