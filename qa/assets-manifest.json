@@ -1,0 +1,22 @@
+{
+  "version": "1.0",
+  "note": "Synthetic baseline suite. Replace or supplement with real hair/fur/photo samples before release scoring.",
+  "assetsDir": "qa/assets",
+  "assets": [
+    { "id": "01", "fileName": "01-portrait-hair-simulated.png", "scenario": "人像发丝模拟", "priority": "P0", "needsRealPhoto": true },
+    { "id": "02", "fileName": "02-curly-hair-simulated.png", "scenario": "卷发碎发模拟", "priority": "P0", "needsRealPhoto": true },
+    { "id": "03", "fileName": "03-pet-long-fur-simulated.png", "scenario": "宠物长毛模拟", "priority": "P0", "needsRealPhoto": true },
+    { "id": "04", "fileName": "04-pet-short-fur-simulated.png", "scenario": "宠物短毛模拟", "priority": "P1", "needsRealPhoto": true },
+    { "id": "05", "fileName": "05-light-product-white-bg.png", "scenario": "白底浅色商品", "priority": "P0", "needsRealPhoto": false },
+    { "id": "06", "fileName": "06-dark-product.png", "scenario": "深色商品", "priority": "P0", "needsRealPhoto": false },
+    { "id": "07", "fileName": "07-transparent-material.png", "scenario": "透明材质", "priority": "P1", "needsRealPhoto": false },
+    { "id": "08", "fileName": "08-person-complex-bg.png", "scenario": "复杂背景人物", "priority": "P0", "needsRealPhoto": true },
+    { "id": "09", "fileName": "09-product-complex-bg.png", "scenario": "复杂背景商品", "priority": "P0", "needsRealPhoto": false },
+    { "id": "10", "fileName": "10-illustration-icons.png", "scenario": "插画图标", "priority": "P1", "needsRealPhoto": false },
+    { "id": "11", "fileName": "11-sticker-pack.png", "scenario": "多元素贴纸合集", "priority": "P0", "needsRealPhoto": false },
+    { "id": "12", "fileName": "12-nearby-characters.png", "scenario": "靠近多角色", "priority": "P0", "needsRealPhoto": false },
+    { "id": "13", "fileName": "13-small-details.png", "scenario": "小物体细节", "priority": "P1", "needsRealPhoto": false },
+    { "id": "14", "fileName": "14-logo-text-product.png", "scenario": "文字 logo 商品", "priority": "P1", "needsRealPhoto": false },
+    { "id": "15", "fileName": "15-high-contrast-edge.png", "scenario": "高对比边缘", "priority": "P1", "needsRealPhoto": false }
+  ]
+}

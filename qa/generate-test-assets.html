@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>QA Test Asset Generator</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 24px;
+        color: #111827;
+      }
+      button {
+        border: 0;
+        border-radius: 10px;
+        background: #34c786;
+        color: white;
+        padding: 12px 16px;
+        font-weight: 700;
+      }
+      pre {
+        white-space: pre-wrap;
+        border: 1px solid #e4e7ec;
+        border-radius: 12px;
+        padding: 12px;
+        background: #f7f8fa;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Cutout Studio QA Test Asset Generator</h1>
+    <p>点击生成并下载 15 张基础 PNG 测试图。真实发丝/宠物毛发仍需补充真实照片样张。</p>
+    <button id="generateBtn" type="button">生成 15 张测试图</button>
+    <pre id="log">等待生成。</pre>
+    <script type="module" src="./generate-test-assets.js"></script>
+  </body>
+</html>

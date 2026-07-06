@@ -244,12 +244,23 @@ h2 {
     var(--surface);
   box-shadow: var(--shadow);
   margin-bottom: 16px;
+  cursor: pointer;
+  transition:
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.16s ease;
 }
 
 .dropzone.is-over,
-.dropzone.has-file {
+.dropzone.has-file,
+.dropzone:hover,
+.dropzone:focus-visible {
   border-style: solid;
   border-color: var(--accent);
+}
+
+.dropzone:active {
+  transform: scale(0.995);
 }
 
 .drop-icon {
@@ -606,23 +617,55 @@ output {
   transition: width 0.2s ease;
 }
 
-.preview-tabs {
+.preview-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.preview-tabs,
+.background-tabs {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
 }
 
-.preview-toggle {
+.preview-toggle,
+.background-toggle,
+.background-color-label {
   min-height: 34px;
   border-radius: 999px;
   padding: 0 12px;
   font-size: 13px;
 }
 
-.preview-toggle.active {
+.preview-toggle.active,
+.background-toggle.active,
+.background-color-label:focus-within {
   border-color: var(--accent);
   color: #13764d;
   background: var(--accent-soft);
+}
+
+.background-color-label {
+  border: 1px solid var(--line);
+  background: #ffffff;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.background-color-label input {
+  width: 22px;
+  height: 22px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
 }
 
 .canvases {
@@ -671,6 +714,36 @@ canvas {
 
 .checker,
 .thumb {
+  background-color: #ffffff;
+  background-image:
+    linear-gradient(45deg, #eef1f4 25%, transparent 25%),
+    linear-gradient(-45deg, #eef1f4 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #eef1f4 75%),
+    linear-gradient(-45deg, transparent 75%, #eef1f4 75%);
+  background-position:
+    0 0,
+    0 10px,
+    10px -10px,
+    -10px 0;
+  background-size: 20px 20px;
+}
+
+.result-card.bg-white {
+  background: #ffffff;
+  background-image: none;
+}
+
+.result-card.bg-black {
+  background: #0b0f19;
+  background-image: none;
+}
+
+.result-card.bg-color {
+  background: var(--preview-bg-color, #34c786);
+  background-image: none;
+}
+
+.result-card.bg-checker {
   background-color: #ffffff;
   background-image:
     linear-gradient(45deg, #eef1f4 25%, transparent 25%),
@@ -819,7 +892,7 @@ canvas {
 
 .asset-actions {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr 1fr auto;
   gap: 8px;
   opacity: 0;
   transition: opacity 0.16s ease;
@@ -828,6 +901,12 @@ canvas {
 .element-card:hover .asset-actions,
 .element-card.selected .asset-actions {
   opacity: 1;
+}
+
+@media (hover: none) {
+  .asset-actions {
+    opacity: 1;
+  }
 }
 
 .danger-lite {
@@ -1141,19 +1220,27 @@ canvas {
   isolation: isolate;
 }
 
-.preview-download {
+.preview-actions {
   position: absolute;
   top: 8px;
   right: 12px;
   z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.preview-actions .ghost {
   min-height: 30px;
   border-radius: 999px;
   padding: 0 11px;
   font-size: 12px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(8px);
 }
 
 .result-card figcaption {
-  padding-right: 148px;
+  padding-right: 230px;
 }
 
 .export-hint {
@@ -1172,13 +1259,12 @@ canvas {
   background: var(--accent-soft);
 }
 
-.app:not(.app-done) .preview-download {
+.app:not(.app-done) .preview-actions {
   display: none;
 }
 
 .app-has-image:not(.app-done) .export-panel .format-label,
-.app-has-image:not(.app-done) .export-panel .segment,
-.app-has-image:not(.app-done) .export-panel #downloadBatchZipBtn {
+.app-has-image:not(.app-done) .export-panel .segment {
   display: none;
 }
 
@@ -1290,6 +1376,12 @@ canvas {
     order: 3;
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .preview-controls,
+  .preview-tabs,
+  .background-tabs {
+    justify-content: flex-start;
   }
 
   .canvases {

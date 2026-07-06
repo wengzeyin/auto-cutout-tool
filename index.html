@@ -8,7 +8,8 @@
     <script type="importmap">
       {
         "imports": {
-          "onnxruntime-web": "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.all.min.mjs"
+          "onnxruntime-web": "./vendor-ort.all.min.mjs",
+          "onnxruntime-web/webgpu": "./vendor-ort.webgpu.min.mjs"
         }
       }
     </script>
@@ -20,6 +21,7 @@
           <span class="kicker">Cutout Studio</span>
           <div class="actions">
             <button id="sampleBtn" type="button" class="ghost">载入示例</button>
+            <button id="qaSampleBtn" type="button" class="ghost">载入测试图</button>
             <label class="primary">
               <input id="fileInput" type="file" accept="image/*" multiple />
               选择图片
@@ -52,7 +54,7 @@
 
       <section class="workspace">
         <aside class="panel">
-          <section id="dropZone" class="dropzone">
+          <section id="dropZone" class="dropzone" role="button" tabindex="0" aria-label="选择或拖入图片">
             <div class="drop-icon">+</div>
             <div class="drop-copy">
               <strong>拖入图片、粘贴截图，或点击选择文件</strong>
@@ -97,9 +99,20 @@
               <h2>当前图片预览</h2>
               <p>上传后可直接查看原图，处理完成后对比透明抠图结果。</p>
             </div>
-            <div class="preview-tabs" role="group" aria-label="预览模式">
-              <button type="button" class="preview-toggle active" data-preview="split">并排对比</button>
-              <button type="button" class="preview-toggle" data-preview="result">只看结果</button>
+            <div class="preview-controls">
+              <div class="preview-tabs" role="group" aria-label="预览模式">
+                <button type="button" class="preview-toggle active" data-preview="split">并排对比</button>
+                <button type="button" class="preview-toggle" data-preview="result">只看结果</button>
+              </div>
+              <div class="background-tabs" role="group" aria-label="结果背景">
+                <button type="button" class="background-toggle active" data-bg="checker">棋盘格</button>
+                <button type="button" class="background-toggle" data-bg="white">白底</button>
+                <button type="button" class="background-toggle" data-bg="black">黑底</button>
+                <label class="background-color-label" title="彩色背景">
+                  <span>彩色</span>
+                  <input id="previewBgColor" type="color" value="#34c786" aria-label="选择彩色背景" />
+                </label>
+              </div>
             </div>
           </div>
 
@@ -116,7 +129,10 @@
                 <strong>透明抠图</strong>
                 <span id="resultBadge">待处理</span>
               </figcaption>
-              <button id="downloadCutoutBtn" type="button" class="preview-download ghost" disabled>下载整张抠图</button>
+              <div class="preview-actions">
+                <button id="copyCutoutBtn" type="button" class="ghost" disabled>复制 PNG</button>
+                <button id="downloadCutoutBtn" type="button" class="ghost" disabled>下载整张抠图</button>
+              </div>
               <canvas id="resultCanvas"></canvas>
               <canvas id="overlayCanvas"></canvas>
             </figure>
@@ -131,6 +147,8 @@
               <div class="element-actions">
                 <button id="selectAllBtn" type="button" class="ghost" disabled>全选</button>
                 <button id="clearSelectionBtn" type="button" class="ghost" disabled>取消选择</button>
+                <button id="splitSelectedBtn" type="button" class="ghost" disabled>拆分此元素</button>
+                <button id="mergeSelectedBtn" type="button" class="ghost" disabled>合并选中</button>
                 <button id="downloadSelectedZipBtn" type="button" class="ghost" disabled>下载选中元素 ZIP</button>
                 <button id="downloadZipBtn" type="button" class="ghost" disabled>下载全部 ZIP</button>
               </div>
@@ -158,11 +176,12 @@
               <select id="detectMode">
                 <option value="complete">完整前景</option>
                 <option value="subject" selected>主体切图（推荐）</option>
-                <option value="split">元素拆分</option>
+                <option value="split">多元素拆分</option>
                 <option value="illustration">高级：色块拆分</option>
               </select>
             </label>
             <button id="processBtn" type="button" disabled>开始自动抠图</button>
+            <button id="cancelBtn" type="button" class="ghost danger-lite" hidden>取消处理</button>
             <button id="rescanBtn" type="button" class="ghost" disabled>重新识别元素</button>
             <details class="advanced">
               <summary>高级设置</summary>
@@ -180,6 +199,15 @@
                 <span>最小元素面积 <output id="areaOut">800</output></span>
                 <small>碎片太多时调高</small>
                 <input id="minArea" type="range" min="20" max="5000" step="20" value="800" />
+              </label>
+              <label>
+                拆分强度
+                <small>靠近元素被合并时改为强</small>
+                <select id="splitStrength">
+                  <option value="conservative">保守</option>
+                  <option value="standard" selected>标准</option>
+                  <option value="strong">强</option>
+                </select>
               </label>
               <label>
                 <span>导出留边 <output id="padOut">12</output></span>

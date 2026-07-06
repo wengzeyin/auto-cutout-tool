@@ -1,4 +1,4 @@
-import { removeBackground } from "https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/dist/index.mjs";
+import { removeBackground } from "./vendor-imgly-background-removal.mjs";
 import JSZip from "https://esm.sh/jszip@3.10.1";
 
 const els = {
@@ -7,6 +7,7 @@ const els = {
   dropZone: document.querySelector("#dropZone"),
   uploadFeedback: document.querySelector("#uploadFeedback"),
   sampleBtn: document.querySelector("#sampleBtn"),
+  qaSampleBtn: document.querySelector("#qaSampleBtn"),
   sourceCanvas: document.querySelector("#sourceCanvas"),
   resultCanvas: document.querySelector("#resultCanvas"),
   overlayCanvas: document.querySelector("#overlayCanvas"),
@@ -15,6 +16,7 @@ const els = {
   alphaThreshold: document.querySelector("#alphaThreshold"),
   colorTolerance: document.querySelector("#colorTolerance"),
   minArea: document.querySelector("#minArea"),
+  splitStrength: document.querySelector("#splitStrength"),
   padding: document.querySelector("#padding"),
   includeText: document.querySelector("#includeText"),
   showBoxes: document.querySelector("#showBoxes"),
@@ -42,7 +44,9 @@ const els = {
   manualPreviewCanvas: document.querySelector("#manualPreviewCanvas"),
   formatSegments: [...document.querySelectorAll(".format-segment")],
   processBtn: document.querySelector("#processBtn"),
+  cancelBtn: document.querySelector("#cancelBtn"),
   rescanBtn: document.querySelector("#rescanBtn"),
+  copyCutoutBtn: document.querySelector("#copyCutoutBtn"),
   downloadCutoutBtn: document.querySelector("#downloadCutoutBtn"),
   downloadZipBtn: document.querySelector("#downloadZipBtn"),
   downloadSelectedZipBtn: document.querySelector("#downloadSelectedZipBtn"),
@@ -59,12 +63,16 @@ const els = {
   resultBadge: document.querySelector("#resultBadge"),
   previewArea: document.querySelector("#previewArea"),
   previewToggles: [...document.querySelectorAll(".preview-toggle")],
+  backgroundToggles: [...document.querySelectorAll(".background-toggle")],
+  previewBgColor: document.querySelector("#previewBgColor"),
   countLabel: document.querySelector("#countLabel"),
   queueCount: document.querySelector("#queueCount"),
   queueList: document.querySelector("#queueList"),
   elementGrid: document.querySelector("#elementGrid"),
   selectAllBtn: document.querySelector("#selectAllBtn"),
   clearSelectionBtn: document.querySelector("#clearSelectionBtn"),
+  splitSelectedBtn: document.querySelector("#splitSelectedBtn"),
+  mergeSelectedBtn: document.querySelector("#mergeSelectedBtn"),
   mobilePrimaryBtn: document.querySelector("#mobilePrimaryBtn"),
 };
 
@@ -73,6 +81,7 @@ const state = {
   imageName: "image",
   cutoutBlob: null,
   originalCutoutBlob: null,
+  sourceOriginalCanvas: document.createElement("canvas"),
   cutoutOriginalCanvas: document.createElement("canvas"),
   refinedCutoutCanvas: document.createElement("canvas"),
   processingToken: 0,
@@ -85,6 +94,7 @@ const state = {
   currentItem: null,
   nextItemId: 1,
   batchRunning: false,
+  lastBatchReport: null,
   objectUrls: [],
   selectedComponentIds: new Set(),
   processing: false,
@@ -94,6 +104,7 @@ const state = {
   visibleComponentLimit: 30,
   minAreaTouched: false,
   previewMode: "split",
+  previewBackground: "checker",
   manual: false,
   dragStart: null,
   selection: null,
@@ -107,6 +118,7 @@ syncOutputs();
 bindEvents();
 updateDownloadLabels();
 syncFormatSegments();
+setPreviewBackground("checker");
 updateUiState();
 renderQueue();
 
@@ -146,6 +158,18 @@ function setPreviewMode(mode) {
   }
 }
 
+function setPreviewBackground(mode) {
+  const allowed = new Set(["checker", "white", "black", "color"]);
+  state.previewBackground = allowed.has(mode) ? mode : "checker";
+  const resultCard = els.resultCanvas.closest(".result-card");
+  resultCard?.classList.remove("bg-checker", "bg-white", "bg-black", "bg-color");
+  resultCard?.classList.add(`bg-${state.previewBackground}`);
+  resultCard?.style.setProperty("--preview-bg-color", els.previewBgColor.value || "#34c786");
+  for (const toggle of els.backgroundToggles) {
+    toggle.classList.toggle("active", toggle.dataset.bg === state.previewBackground);
+  }
+}
+
 function syncFormatSegments() {
   const { ext } = getExportSettings();
   for (const segment of els.formatSegments) {
@@ -170,8 +194,11 @@ function bindEvents() {
   });
 
   els.sampleBtn.addEventListener("click", loadSample);
+  els.qaSampleBtn.addEventListener("click", loadQaSamples);
   els.processBtn.addEventListener("click", processImage);
+  els.cancelBtn.addEventListener("click", cancelProcessing);
   els.rescanBtn.addEventListener("click", scanAndRender);
+  els.copyCutoutBtn.addEventListener("click", copyCutout);
   els.downloadCutoutBtn.addEventListener("click", downloadCutout);
   els.downloadZipBtn.addEventListener("click", downloadZip);
   els.downloadSelectedZipBtn.addEventListener("click", downloadSelectedZip);
@@ -180,6 +207,8 @@ function bindEvents() {
   els.exportSelectionBtn.addEventListener("click", exportSelection);
   els.selectAllBtn.addEventListener("click", selectAllComponents);
   els.clearSelectionBtn.addEventListener("click", clearComponentSelection);
+  els.splitSelectedBtn.addEventListener("click", splitSelectedComponent);
+  els.mergeSelectedBtn.addEventListener("click", mergeSelectedComponents);
   els.mobilePrimaryBtn.addEventListener("click", handleMobilePrimary);
   els.formatSelect.addEventListener("change", () => {
     updateDownloadLabels();
@@ -206,6 +235,10 @@ function bindEvents() {
   for (const toggle of els.previewToggles) {
     toggle.addEventListener("click", () => setPreviewMode(toggle.dataset.preview));
   }
+  for (const toggle of els.backgroundToggles) {
+    toggle.addEventListener("click", () => setPreviewBackground(toggle.dataset.bg));
+  }
+  els.previewBgColor.addEventListener("input", () => setPreviewBackground("color"));
 
   for (const input of [els.edgeSmooth, els.feather, els.cleanup, els.edgeOffset]) {
     input.addEventListener("input", () => {
@@ -243,7 +276,7 @@ function bindEvents() {
       }
     });
   }
-  for (const input of [els.detectMode, els.includeText, els.showBoxes]) {
+  for (const input of [els.detectMode, els.includeText, els.showBoxes, els.splitStrength]) {
     input.addEventListener("change", () => {
       syncOutputs();
       updateUiState();
@@ -252,6 +285,15 @@ function bindEvents() {
     });
   }
 
+  els.dropZone.addEventListener("click", (event) => {
+    if (event.target.closest("button, a, input, label, select, textarea")) return;
+    els.fileInput.click();
+  });
+  els.dropZone.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    els.fileInput.click();
+  });
   els.dropZone.addEventListener("dragover", (event) => {
     event.preventDefault();
     els.dropZone.classList.add("is-over");
@@ -304,6 +346,7 @@ async function addFiles(files, source, options = {}) {
       name: cleanName(file.name || `${source}-image-${state.nextItemId}`),
       originalName: file.name || `${source}图片`,
       previewUrl,
+      isQa: Boolean(options.isQa),
       status: "ready",
       message: "待处理",
       cutoutBlob: null,
@@ -409,13 +452,14 @@ function getRefineSettings() {
 }
 
 function updateDownloadLabels() {
-  const { label } = getExportSettings();
+  const { ext, label } = getExportSettings();
+  els.copyCutoutBtn.textContent = "复制 PNG";
   els.downloadCutoutBtn.textContent = `下载整张抠图 ${label}`;
   els.downloadZipBtn.textContent = "下载全部 ZIP";
   els.downloadBatchZipBtn.textContent = `批量处理并下载 ZIP`;
   els.exportHint.textContent =
-    els.formatSelect.value === "svg"
-      ? "SVG 为内嵌 PNG 位图，用于兼容设计软件，不是矢量路径。"
+    ext === "svg"
+      ? "SVG 将导出为矢量路径，适合 logo、贴纸和扁平插画；照片会被近似成大量色块路径。"
       : "处理完成后可导出 PNG / WebP / SVG。";
   for (const button of els.elementGrid.querySelectorAll("[data-download-element]")) {
     button.textContent = `下载 ${label}`;
@@ -435,6 +479,7 @@ async function loadItem(item) {
     const bitmap = await createImageBitmap(item.file);
     item.originalWidth = bitmap.width;
     item.originalHeight = bitmap.height;
+    drawBitmapToCanvas(bitmap, state.sourceOriginalCanvas, state.sourceOriginalCanvas.getContext("2d"), Infinity);
     drawBitmapToCanvas(bitmap, els.sourceCanvas, sourceCtx);
     applyDynamicDefaults(els.sourceCanvas.width, els.sourceCanvas.height);
     sizeOverlay();
@@ -449,6 +494,7 @@ async function loadItem(item) {
       state.originalCutoutBlob = item.originalCutoutBlob || item.cutoutBlob;
       state.components = item.components || [];
       els.rescanBtn.disabled = false;
+      els.copyCutoutBtn.disabled = false;
       els.downloadCutoutBtn.disabled = false;
       els.manualModeBtn.disabled = false;
       drawOverlay();
@@ -512,6 +558,43 @@ async function loadSample() {
   await addFiles([file], "示例");
 }
 
+async function loadQaSamples() {
+  if (state.processing) {
+    setUploadFeedback("当前正在处理，稍后再载入测试图。", "warn");
+    return;
+  }
+
+  els.qaSampleBtn.disabled = true;
+  const originalText = els.qaSampleBtn.textContent;
+  els.qaSampleBtn.textContent = "载入中...";
+  setUploadFeedback("正在载入 QA 测试图...", "ok");
+
+  try {
+    const manifestResponse = await fetch("./qa/assets-manifest.json", { cache: "no-store" });
+    if (!manifestResponse.ok) throw new Error("测试图清单读取失败");
+    const manifest = await manifestResponse.json();
+    const files = [];
+
+    for (const asset of manifest.assets || []) {
+      const response = await fetch(`./${manifest.assetsDir}/${asset.fileName}`, { cache: "no-store" });
+      if (!response.ok) throw new Error(`缺少测试图：${asset.fileName}`);
+      const blob = await response.blob();
+      files.push(new File([blob], asset.fileName, { type: blob.type || "image/png" }));
+    }
+
+    if (!files.length) throw new Error("测试图清单为空");
+    clearQueue();
+    await addFiles(files, "测试图", { autoSelect: true, isQa: true });
+    setUploadFeedback(`已载入 ${files.length} 张 QA 测试图，可逐张开始抠图验收。`, "ok");
+  } catch (error) {
+    console.error(error);
+    setUploadFeedback(`测试图载入失败：${error?.message || "请检查 qa/assets 是否完整"}`, "warn");
+  } finally {
+    els.qaSampleBtn.disabled = false;
+    els.qaSampleBtn.textContent = originalText;
+  }
+}
+
 function roundRect(ctx, x, y, width, height, radius) {
   ctx.beginPath();
   ctx.moveTo(x + radius, y);
@@ -526,6 +609,8 @@ function resetResult() {
   state.cutoutBlob = null;
   state.originalCutoutBlob = null;
   state.alphaNormalized = false;
+  state.sourceOriginalCanvas.width = 0;
+  state.sourceOriginalCanvas.height = 0;
   state.cutoutOriginalCanvas.width = 0;
   state.cutoutOriginalCanvas.height = 0;
   state.refinedCutoutCanvas.width = 0;
@@ -541,6 +626,7 @@ function resetResult() {
   els.overlayCanvas.height = 0;
   els.processBtn.disabled = !state.file;
   els.rescanBtn.disabled = true;
+  els.copyCutoutBtn.disabled = true;
   els.downloadCutoutBtn.disabled = true;
   els.downloadZipBtn.disabled = true;
   els.manualModeBtn.disabled = true;
@@ -618,6 +704,23 @@ async function removeQueueItem(item) {
   }
 }
 
+function clearQueue() {
+  for (const item of state.queue) {
+    if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+  }
+  state.queue = [];
+  state.currentItem = null;
+  state.file = null;
+  state.imageName = "image";
+  state.components = [];
+  state.selectedComponentIds.clear();
+  resetSourceCanvas();
+  resetResult();
+  renderQueue();
+  updateBatchButton();
+  updateUiState();
+}
+
 function updateBatchButton() {
   const hasQueue = state.queue.length > 0;
   els.downloadBatchZipBtn.disabled = state.batchRunning || !hasQueue;
@@ -627,6 +730,22 @@ function setUploadFeedback(message, tone = "") {
   els.uploadFeedback.className = `upload-feedback ${tone}`.trim();
   els.uploadFeedback.textContent = message;
   els.dropZone.classList.toggle("has-file", state.queue.length > 0);
+}
+
+function cancelProcessing() {
+  if (!state.processing) return;
+  state.processingToken += 1;
+  state.processing = false;
+  setBusy(false);
+  hideProgress();
+  if (state.currentItem?.status === "processing") {
+    state.currentItem.status = "ready";
+    state.currentItem.message = state.currentItem.cutoutBlob ? `${state.currentItem.components.length} 个元素` : "已取消";
+    renderQueue();
+  }
+  setStatus("已取消处理。");
+  setUploadFeedback("已取消当前处理，可以重新开始或选择其他图片。", "warn");
+  updateUiState();
 }
 
 async function processImage(options = {}) {
@@ -673,6 +792,7 @@ async function processImage(options = {}) {
     }
     sizeOverlay();
     els.rescanBtn.disabled = false;
+    els.copyCutoutBtn.disabled = false;
     els.downloadCutoutBtn.disabled = false;
     els.manualModeBtn.disabled = false;
     await scanAndRender();
@@ -749,6 +869,7 @@ async function scanAndRender() {
     const minAreaLow = Math.max(8, Math.round(minArea * detection.scale * detection.scale));
     const paddingLow = Math.max(1, Math.round(padding * detection.scale));
     const useIllustrationMode = mode === "illustration";
+    const useMultiObjectMode = mode === "split";
     const rawComponents = useIllustrationMode
       ? findIllustrationComponents(
           detection.imageData,
@@ -758,11 +879,17 @@ async function scanAndRender() {
           els.includeText.checked,
           Number(els.colorTolerance.value),
         )
-      : findSmartComponents(detection.imageData, alphaThreshold, minAreaLow, paddingLow);
-    const mergedLow = postProcessComponents(rawComponents, detection.width, detection.height, minAreaLow, {
-      mergeDistance: mode === "subject" ? 10 : useIllustrationMode ? 22 : 16,
-      absorbDistance: mode === "subject" ? 14 : useIllustrationMode ? 26 : 20,
-    });
+      : useMultiObjectMode
+        ? findMultiObjectComponents(detection.imageData, alphaThreshold, minAreaLow, paddingLow, {
+            strength: els.splitStrength.value,
+          })
+        : findSmartComponents(detection.imageData, alphaThreshold, minAreaLow, paddingLow);
+    const mergedLow = useMultiObjectMode
+      ? rawComponents
+      : postProcessComponents(rawComponents, detection.width, detection.height, minAreaLow, {
+          mergeDistance: mode === "subject" ? 10 : useIllustrationMode ? 22 : 16,
+          absorbDistance: mode === "subject" ? 14 : useIllustrationMode ? 26 : 20,
+        });
     const beforeMergeCount = rawComponents.length;
     const qualityLow = addComponentQuality(mergedLow, detection.imageData, Math.max(16, alphaThreshold));
     const validLow = filterBadComponents(qualityLow, detection.width, detection.height);
@@ -789,6 +916,8 @@ async function scanAndRender() {
       const reduced = beforeMergeCount - state.components.length;
       if (mode === "subject") {
         setSuccess(`已按主体切图识别到 ${state.components.length} 个主要主体。`);
+      } else if (mode === "split" && state.components.length === 1 && hasLikelyMultipleObjects(validLow, detection.width, detection.height)) {
+        setStatus("这个元素可能包含多个靠近对象，建议点击“拆分此元素”或把拆分强度调为“强”。", "可能漏识别");
       } else if (reduced >= Math.max(3, Math.round(beforeMergeCount * 0.25))) {
         setSuccess(`已自动合并相邻碎片，识别到 ${state.components.length} 个完整元素。`);
       } else {
@@ -815,7 +944,8 @@ async function redrawCutoutCanvas() {
 async function refineAndPreviewCutout({ immediateScan = true } = {}) {
   if (!state.cutoutOriginalCanvas.width) return;
   const refineResult = await refineCutoutAlphaAsync(state.cutoutOriginalCanvas, getRefineSettings());
-  state.refinedCutoutCanvas = refineResult.canvas;
+  const detailResult = restoreIllustrationDetails(refineResult.canvas, state.sourceOriginalCanvas, getRefineSettings());
+  state.refinedCutoutCanvas = detailResult.canvas;
   state.alphaNormalized = refineResult.alphaNormalized;
   state.cutoutBlob = await canvasToBlob(state.refinedCutoutCanvas);
   if (state.currentItem) {
@@ -828,6 +958,7 @@ async function refineAndPreviewCutout({ immediateScan = true } = {}) {
   drawOverlay();
   updateManualPreview();
   if (state.alphaNormalized) setStatus("已自动增强主体透明度。", "透明度已修复");
+  if (detailResult.restoredPixels > 120) setStatus("已保护插画描边和细节。", "线稿已修复");
   if (immediateScan) scheduleScan(250);
 }
 
@@ -910,6 +1041,79 @@ function refineCutoutAlpha(sourceCanvas, settings) {
   }
   ctx.putImageData(imageData, 0, 0);
   return { canvas, alphaNormalized };
+}
+
+function restoreIllustrationDetails(cutoutCanvas, originalCanvas, settings) {
+  if (!originalCanvas?.width || !cutoutCanvas?.width) return { canvas: cutoutCanvas, restoredPixels: 0 };
+
+  const width = cutoutCanvas.width;
+  const height = cutoutCanvas.height;
+  const resultCtx = cutoutCanvas.getContext("2d", { willReadFrequently: true });
+  const result = resultCtx.getImageData(0, 0, width, height);
+  const originalMatch = document.createElement("canvas");
+  originalMatch.width = width;
+  originalMatch.height = height;
+  const originalCtx = originalMatch.getContext("2d", { willReadFrequently: true });
+  originalCtx.imageSmoothingEnabled = true;
+  originalCtx.imageSmoothingQuality = "high";
+  originalCtx.drawImage(originalCanvas, 0, 0, width, height);
+  const original = originalCtx.getImageData(0, 0, width, height);
+
+  const supportThreshold = Math.max(12, Math.round((settings.cleanup || 24) * 0.65));
+  const foreground = new Uint8Array(width * height);
+  for (let index = 0; index < foreground.length; index += 1) {
+    foreground[index] = result.data[index * 4 + 3] > supportThreshold ? 1 : 0;
+  }
+  const nearForeground = dilateMask(foreground, width, height, Math.max(2, Math.min(5, Number(settings.edgeSmooth || 2) + 2)));
+
+  let restoredPixels = 0;
+  for (let index = 0; index < foreground.length; index += 1) {
+    if (!nearForeground[index]) continue;
+    const offset = index * 4;
+    const alpha = result.data[offset + 3];
+    const red = original.data[offset];
+    const green = original.data[offset + 1];
+    const blue = original.data[offset + 2];
+    const metrics = colorMetrics(red, green, blue);
+    const nearWhite = metrics.lightness > 242 && metrics.saturation < 0.16;
+    if (nearWhite) continue;
+
+    const darkStroke = metrics.lightness < 110 && metrics.saturation < 0.72;
+    const coloredFill = metrics.saturation > 0.28 && metrics.lightness < 238;
+
+    if (alpha > 40 && (darkStroke || coloredFill)) {
+      result.data[offset] = red;
+      result.data[offset + 1] = green;
+      result.data[offset + 2] = blue;
+    }
+
+    if (darkStroke && alpha < 220) {
+      result.data[offset] = red;
+      result.data[offset + 1] = green;
+      result.data[offset + 2] = blue;
+      result.data[offset + 3] = Math.max(alpha, alpha < settings.cleanup ? 235 : 255);
+      restoredPixels += 1;
+    } else if (coloredFill && alpha > 0 && alpha < 160) {
+      result.data[offset] = red;
+      result.data[offset + 1] = green;
+      result.data[offset + 2] = blue;
+      result.data[offset + 3] = Math.max(alpha, 180);
+      restoredPixels += 1;
+    }
+  }
+
+  resultCtx.putImageData(result, 0, 0);
+  return { canvas: cutoutCanvas, restoredPixels };
+}
+
+function colorMetrics(red, green, blue) {
+  const max = Math.max(red, green, blue);
+  const min = Math.min(red, green, blue);
+  const lightness = red * 0.299 + green * 0.587 + blue * 0.114;
+  return {
+    lightness,
+    saturation: max ? (max - min) / max : 0,
+  };
 }
 
 function analyzeAlpha(imageData) {
@@ -1057,6 +1261,676 @@ function findSmartComponents(imageData, alphaThreshold, minArea, pad) {
   const alphaMask = cleanAlphaMask(imageData, alphaThreshold);
   const mergedMask = dilateMask(alphaMask, imageData.width, imageData.height, radius);
   return findComponentsFromMask(mergedMask, imageData.width, imageData.height, minArea, Math.max(pad, radius));
+}
+
+function getSplitSettings(strength = "standard") {
+  const presets = {
+    conservative: {
+      coreBase: 64,
+      supportBase: 22,
+      minCoreFactor: 0.18,
+      absorbScale: 0.014,
+      mergeDistance: 8,
+      gapDensityRatio: 0.08,
+      valleyDensityRatio: 0.42,
+      gapMinRatio: 0.018,
+      splitPaddingFactor: 1,
+    },
+    standard: {
+      coreBase: 72,
+      supportBase: 22,
+      minCoreFactor: 0.12,
+      absorbScale: 0.01,
+      mergeDistance: 6,
+      gapDensityRatio: 0.12,
+      valleyDensityRatio: 0.5,
+      gapMinRatio: 0.014,
+      splitPaddingFactor: 0.8,
+    },
+    strong: {
+      coreBase: 80,
+      supportBase: 24,
+      minCoreFactor: 0.08,
+      absorbScale: 0.007,
+      mergeDistance: 4,
+      gapDensityRatio: 0.18,
+      valleyDensityRatio: 0.62,
+      gapMinRatio: 0.01,
+      splitPaddingFactor: 0.55,
+    },
+  };
+  return presets[strength] || presets.standard;
+}
+
+function findMultiObjectComponents(imageData, alphaThreshold, minArea, pad, options = {}) {
+  const { width, height } = imageData;
+  const imageArea = width * height;
+  const settings = getSplitSettings(options.strength);
+  const coreThreshold = Math.max(settings.coreBase, alphaThreshold + 16);
+  const supportThreshold = Math.max(settings.supportBase, Math.round(alphaThreshold * 0.65));
+  const coreMask = createAlphaMask(imageData, coreThreshold);
+  const supportMask = createAlphaMask(imageData, supportThreshold);
+  const minCoreArea = Math.max(6, Math.round(minArea * settings.minCoreFactor));
+  const seeds = findCoreSeeds(coreMask, width, height, minCoreArea);
+
+  if (!seeds.length) {
+    return findComponentsFromMask(cleanAlphaMask(imageData, alphaThreshold), width, height, minArea, pad);
+  }
+
+  const labels = growSeedsIntoSupport(seeds, supportMask, width, height);
+  let components = componentsFromLabels(labels, seeds.length, width, height, imageData, Math.max(24, alphaThreshold), pad)
+    .filter((component) => keepMultiObjectComponent(component, imageArea, minArea));
+
+  components = splitLargeComponents(components, imageData, coreMask, width, height, minCoreArea, pad, settings);
+  components = absorbTinyMultiObjectFragments(components, imageArea, minArea, settings);
+  components = mergeAssetFragments(components, imageData, Math.max(24, alphaThreshold), settings);
+
+  return sortComponentsReadingOrder(components)
+    .map((component, index) => ({ ...component, id: index + 1, mask: undefined }));
+}
+
+function findCoreSeeds(mask, width, height, minArea) {
+  const visited = new Uint8Array(mask.length);
+  const seeds = [];
+  const stack = [];
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const start = y * width + x;
+      if (visited[start] || !mask[start]) continue;
+
+      let minX = x;
+      let minY = y;
+      let maxX = x;
+      let maxY = y;
+      const pixels = [];
+      visited[start] = 1;
+      stack.push(start);
+
+      while (stack.length) {
+        const index = stack.pop();
+        const px = index % width;
+        const py = Math.floor(index / width);
+        pixels.push(index);
+        if (px < minX) minX = px;
+        if (px > maxX) maxX = px;
+        if (py < minY) minY = py;
+        if (py > maxY) maxY = py;
+
+        const neighbors = [index - 1, index + 1, index - width, index + width];
+        for (const next of neighbors) {
+          if (next < 0 || next >= mask.length || visited[next] || !mask[next]) continue;
+          if ((next === index - 1 && px === 0) || (next === index + 1 && px === width - 1)) continue;
+          visited[next] = 1;
+          stack.push(next);
+        }
+      }
+
+      if (pixels.length >= minArea) {
+        seeds.push({ id: seeds.length, pixels, area: pixels.length, x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 });
+      }
+    }
+  }
+
+  return seeds;
+}
+
+function growSeedsIntoSupport(seeds, supportMask, width, height) {
+  const labels = new Int32Array(supportMask.length);
+  labels.fill(-1);
+  const queue = [];
+  let cursor = 0;
+
+  for (const seed of seeds) {
+    for (const index of seed.pixels) {
+      if (!supportMask[index] || labels[index] !== -1) continue;
+      labels[index] = seed.id;
+      queue.push(index);
+    }
+  }
+
+  while (cursor < queue.length) {
+    const index = queue[cursor++];
+    const label = labels[index];
+    const px = index % width;
+    const neighbors = [index - 1, index + 1, index - width, index + width];
+    for (const next of neighbors) {
+      if (next < 0 || next >= supportMask.length || !supportMask[next] || labels[next] !== -1) continue;
+      if ((next === index - 1 && px === 0) || (next === index + 1 && px === width - 1)) continue;
+      labels[next] = label;
+      queue.push(next);
+    }
+  }
+
+  return labels;
+}
+
+function componentsFromLabels(labels, count, width, height, imageData, alphaThreshold, pad) {
+  const boxes = Array.from({ length: count }, () => ({
+    minX: Infinity,
+    minY: Infinity,
+    maxX: -Infinity,
+    maxY: -Infinity,
+    area: 0,
+    strongAlphaArea: 0,
+  }));
+
+  for (let index = 0; index < labels.length; index += 1) {
+    const label = labels[index];
+    if (label < 0) continue;
+    const px = index % width;
+    const py = Math.floor(index / width);
+    const box = boxes[label];
+    box.area += 1;
+    if (imageData.data[index * 4 + 3] >= alphaThreshold) box.strongAlphaArea += 1;
+    if (px < box.minX) box.minX = px;
+    if (px > box.maxX) box.maxX = px;
+    if (py < box.minY) box.minY = py;
+    if (py > box.maxY) box.maxY = py;
+  }
+
+  return boxes
+    .filter((box) => box.area > 0)
+    .map((box, index) => {
+      const padded = padBox(box, pad, width, height);
+      const component = {
+        id: index + 1,
+        area: box.area,
+        strongAlphaArea: box.strongAlphaArea,
+        x: padded.minX,
+        y: padded.minY,
+        width: padded.maxX - padded.minX + 1,
+        height: padded.maxY - padded.minY + 1,
+      };
+      const boxArea = component.width * component.height;
+      component.alphaDensity = component.area / Math.max(1, boxArea);
+      return component;
+    });
+}
+
+function keepMultiObjectComponent(component, imageArea, minArea) {
+  const boxArea = component.width * component.height;
+  const aspect = component.width / Math.max(1, component.height);
+  const denseSmall = component.alphaDensity > 0.22 && boxArea > minArea * 1.4;
+  const meaningfulArea = component.area >= Math.max(minArea * 0.55, imageArea * 0.00025);
+  const residualLine = (aspect > 10 || aspect < 0.1) && component.alphaDensity < 0.24;
+  const weakResidual = component.strongAlphaArea < Math.max(4, minArea * 0.12) && component.alphaDensity < 0.18;
+  return (meaningfulArea || denseSmall) && !residualLine && !weakResidual;
+}
+
+function splitLargeComponents(components, imageData, coreMask, width, height, minCoreArea, pad, settings) {
+  const imageArea = width * height;
+  const output = [];
+
+  for (const component of components) {
+    const children = splitLargeComponent(component, imageData, coreMask, width, height, minCoreArea, pad, settings);
+    if (children.length >= 2) output.push(...children);
+    else output.push(component);
+  }
+
+  return output;
+}
+
+function splitLargeComponent(component, imageData, coreMask, width, height, minCoreArea, pad, settings = getSplitSettings()) {
+  const imageArea = width * height;
+  const boxArea = component.width * component.height;
+  const largeBySize = component.width / width > 0.28 || component.height / height > 0.28;
+  const sparseLarge = boxArea / imageArea > 0.22 && component.alphaDensity < 0.42;
+  const coreChildren = findCoreSeedsInBox(coreMask, width, height, component, minCoreArea);
+  const hasMultipleCore = coreChildren.length >= 2;
+  if (!largeBySize && !sparseLarge && !hasMultipleCore) return [];
+
+  const projectionChildren = projectionSplit(component, imageData, coreMask, minCoreArea, pad, settings);
+  if (projectionChildren.length >= 2) return projectionChildren;
+
+  if (!hasMultipleCore) return [];
+
+  return coreChildren
+    .filter((child) => child.area >= minCoreArea)
+    .map((child) => {
+      const splitPad = Math.max(1, Math.round(pad * settings.splitPaddingFactor));
+      const padded = padBox(
+        { minX: child.x, minY: child.y, maxX: child.x + child.width - 1, maxY: child.y + child.height - 1 },
+        splitPad,
+        width,
+        height,
+      );
+      return measureBoxAsComponent({
+        id: child.id,
+        x: padded.minX,
+        y: padded.minY,
+        width: padded.maxX - padded.minX + 1,
+        height: padded.maxY - padded.minY + 1,
+      }, imageData, Math.max(24, settings.supportBase));
+    })
+    .filter((child) => keepMultiObjectComponent(child, imageArea, minCoreArea));
+}
+
+function projectionSplit(component, imageData, coreMask, minCoreArea, pad, settings) {
+  const vertical = splitByProjection(component, imageData, coreMask, "x", minCoreArea, pad, settings);
+  if (vertical.length >= 2) return vertical;
+  const horizontal = splitByProjection(component, imageData, coreMask, "y", minCoreArea, pad, settings);
+  if (horizontal.length >= 2) return horizontal;
+  const verticalPeaks = splitByProjectionPeaks(component, imageData, coreMask, "x", minCoreArea, pad, settings);
+  if (verticalPeaks.length >= 2) return verticalPeaks;
+  return splitByProjectionPeaks(component, imageData, coreMask, "y", minCoreArea, pad, settings);
+}
+
+function splitByProjection(component, imageData, coreMask, axis, minCoreArea, pad, settings) {
+  const { width, height } = imageData;
+  const startX = Math.max(0, Math.floor(component.x));
+  const startY = Math.max(0, Math.floor(component.y));
+  const endX = Math.min(width, Math.ceil(component.x + component.width));
+  const endY = Math.min(height, Math.ceil(component.y + component.height));
+  const length = axis === "x" ? endX - startX : endY - startY;
+  const crossLength = axis === "x" ? endY - startY : endX - startX;
+  if (length < 24 || crossLength < 8) return [];
+
+  const projection = new Array(length).fill(0);
+  for (let y = startY; y < endY; y += 1) {
+    for (let x = startX; x < endX; x += 1) {
+      if (!coreMask[y * width + x]) continue;
+      projection[axis === "x" ? x - startX : y - startY] += 1;
+    }
+  }
+
+  const nonZero = projection.filter(Boolean);
+  if (!nonZero.length) return [];
+  const average = nonZero.reduce((sum, value) => sum + value, 0) / nonZero.length;
+  const threshold = Math.max(1, average * settings.gapDensityRatio);
+  const minGap = Math.max(3, Math.round(length * settings.gapMinRatio));
+  const gaps = [];
+  let gapStart = -1;
+  for (let i = 0; i < projection.length; i += 1) {
+    const isGap = projection[i] <= threshold;
+    if (isGap && gapStart === -1) gapStart = i;
+    if ((!isGap || i === projection.length - 1) && gapStart !== -1) {
+      const gapEnd = isGap && i === projection.length - 1 ? i + 1 : i;
+      if (gapEnd - gapStart >= minGap) gaps.push({ start: gapStart, end: gapEnd });
+      gapStart = -1;
+    }
+  }
+
+  const cuts = gaps
+    .map((gap) => Math.round((gap.start + gap.end) / 2))
+    .filter((cut) => cut > length * 0.08 && cut < length * 0.92);
+  if (!cuts.length) return [];
+
+  const ranges = [];
+  let last = 0;
+  for (const cut of cuts) {
+    ranges.push([last, cut]);
+    last = cut;
+  }
+  ranges.push([last, length]);
+
+  const children = [];
+  const splitPad = Math.max(1, Math.round(pad * settings.splitPaddingFactor));
+  for (const [rangeStart, rangeEnd] of ranges) {
+    if (rangeEnd - rangeStart < 4) continue;
+    const bounds = contentBoundsInRange(imageData, coreMask, {
+      startX: axis === "x" ? startX + rangeStart : startX,
+      startY: axis === "y" ? startY + rangeStart : startY,
+      endX: axis === "x" ? startX + rangeEnd : endX,
+      endY: axis === "y" ? startY + rangeEnd : endY,
+    });
+    if (!bounds || bounds.area < minCoreArea) continue;
+    const padded = padBox(bounds, splitPad, width, height);
+    const child = measureBoxAsComponent({
+      id: children.length + 1,
+      x: padded.minX,
+      y: padded.minY,
+      width: padded.maxX - padded.minX + 1,
+      height: padded.maxY - padded.minY + 1,
+    }, imageData, Math.max(24, settings.supportBase));
+    if (keepMultiObjectComponent(child, width * height, minCoreArea)) children.push(child);
+  }
+
+  return children.length >= 2 ? children : [];
+}
+
+function splitByProjectionPeaks(component, imageData, coreMask, axis, minCoreArea, pad, settings) {
+  const { width, height } = imageData;
+  const startX = Math.max(0, Math.floor(component.x));
+  const startY = Math.max(0, Math.floor(component.y));
+  const endX = Math.min(width, Math.ceil(component.x + component.width));
+  const endY = Math.min(height, Math.ceil(component.y + component.height));
+  const length = axis === "x" ? endX - startX : endY - startY;
+  const crossLength = axis === "x" ? endY - startY : endX - startX;
+  if (length < 48 || crossLength < 20) return [];
+
+  const projection = new Array(length).fill(0);
+  for (let y = startY; y < endY; y += 1) {
+    for (let x = startX; x < endX; x += 1) {
+      if (!coreMask[y * width + x]) continue;
+      projection[axis === "x" ? x - startX : y - startY] += 1;
+    }
+  }
+
+  const smoothed = smoothProjection(projection, Math.max(2, Math.round(length * 0.012)));
+  const nonZero = smoothed.filter(Boolean);
+  if (!nonZero.length) return [];
+  const max = Math.max(...smoothed);
+  const average = nonZero.reduce((sum, value) => sum + value, 0) / nonZero.length;
+  const peakThreshold = Math.max(2, Math.min(max * 0.38, average * 0.82));
+  const valleyThreshold = Math.max(1, Math.min(max * 0.24, average * settings.valleyDensityRatio));
+  const minRun = Math.max(4, Math.round(length * 0.028));
+  const segments = [];
+  let runStart = -1;
+
+  for (let i = 0; i < smoothed.length; i += 1) {
+    const isPeak = smoothed[i] >= peakThreshold;
+    if (isPeak && runStart === -1) runStart = i;
+    if ((!isPeak || i === smoothed.length - 1) && runStart !== -1) {
+      const runEnd = isPeak && i === smoothed.length - 1 ? i + 1 : i;
+      if (runEnd - runStart >= minRun) segments.push({ start: runStart, end: runEnd });
+      runStart = -1;
+    }
+  }
+
+  if (segments.length < 2) return [];
+
+  const cuts = [];
+  for (let i = 0; i < segments.length - 1; i += 1) {
+    const left = segments[i];
+    const right = segments[i + 1];
+    if (right.start - left.end < Math.max(2, Math.round(length * 0.006))) continue;
+    let valleyIndex = left.end;
+    let valleyValue = Infinity;
+    for (let cursor = left.end; cursor <= right.start; cursor += 1) {
+      const value = smoothed[cursor] ?? 0;
+      if (value < valleyValue) {
+        valleyValue = value;
+        valleyIndex = cursor;
+      }
+    }
+    const leftPeak = Math.max(...smoothed.slice(left.start, left.end));
+    const rightPeak = Math.max(...smoothed.slice(right.start, right.end));
+    const localPeak = Math.min(leftPeak, rightPeak);
+    if (valleyValue <= valleyThreshold || valleyValue <= localPeak * 0.55) cuts.push(valleyIndex);
+  }
+
+  const uniqueCuts = [...new Set(cuts)]
+    .filter((cut) => cut > length * 0.06 && cut < length * 0.94)
+    .sort((a, b) => a - b);
+  if (!uniqueCuts.length) return [];
+
+  const ranges = [];
+  let last = 0;
+  for (const cut of uniqueCuts) {
+    ranges.push([last, cut]);
+    last = cut;
+  }
+  ranges.push([last, length]);
+
+  const children = componentsFromProjectionRanges(ranges, axis, { startX, startY, endX, endY }, imageData, coreMask, minCoreArea, pad, settings);
+  if (children.length < 2) return [];
+
+  const parentDensity = measureComponent(component, imageData, Math.max(24, settings.supportBase)).alphaDensity;
+  const childDensity = children.reduce((sum, child) => sum + child.alphaDensity, 0) / children.length;
+  return childDensity >= parentDensity * 0.72 ? children : [];
+}
+
+function smoothProjection(values, radius) {
+  const output = new Array(values.length).fill(0);
+  let sum = 0;
+  for (let i = -radius; i < values.length + radius; i += 1) {
+    const add = i + radius;
+    if (add >= 0 && add < values.length) sum += values[add];
+    const remove = i - radius - 1;
+    if (remove >= 0 && remove < values.length) sum -= values[remove];
+    if (i >= 0 && i < values.length) {
+      const from = Math.max(0, i - radius);
+      const to = Math.min(values.length - 1, i + radius);
+      output[i] = sum / Math.max(1, to - from + 1);
+    }
+  }
+  return output;
+}
+
+function componentsFromProjectionRanges(ranges, axis, rect, imageData, coreMask, minCoreArea, pad, settings) {
+  const { width, height } = imageData;
+  const children = [];
+  const splitPad = Math.max(1, Math.round(pad * settings.splitPaddingFactor));
+  for (const [rangeStart, rangeEnd] of ranges) {
+    if (rangeEnd - rangeStart < 4) continue;
+    const bounds = contentBoundsInRange(imageData, coreMask, {
+      startX: axis === "x" ? rect.startX + rangeStart : rect.startX,
+      startY: axis === "y" ? rect.startY + rangeStart : rect.startY,
+      endX: axis === "x" ? rect.startX + rangeEnd : rect.endX,
+      endY: axis === "y" ? rect.startY + rangeEnd : rect.endY,
+    });
+    if (!bounds || bounds.area < minCoreArea) continue;
+    const padded = padBox(bounds, splitPad, width, height);
+    const child = measureBoxAsComponent({
+      id: children.length + 1,
+      x: padded.minX,
+      y: padded.minY,
+      width: padded.maxX - padded.minX + 1,
+      height: padded.maxY - padded.minY + 1,
+    }, imageData, Math.max(24, settings.supportBase));
+    if (keepMultiObjectComponent(child, width * height, minCoreArea)) children.push(child);
+  }
+  return children;
+}
+
+function contentBoundsInRange(imageData, coreMask, rect) {
+  const { width, height } = imageData;
+  const startX = Math.max(0, Math.floor(rect.startX));
+  const startY = Math.max(0, Math.floor(rect.startY));
+  const endX = Math.min(width, Math.ceil(rect.endX));
+  const endY = Math.min(height, Math.ceil(rect.endY));
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let area = 0;
+  for (let y = startY; y < endY; y += 1) {
+    for (let x = startX; x < endX; x += 1) {
+      if (!coreMask[y * width + x]) continue;
+      area += 1;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
+  if (!area) return null;
+  return { minX, minY, maxX, maxY, area };
+}
+
+function measureBoxAsComponent(box, imageData, alphaThreshold) {
+  const metrics = measureComponent(box, imageData, alphaThreshold);
+  return {
+    ...box,
+    area: metrics.alphaArea,
+    strongAlphaArea: metrics.strongAlphaArea,
+    alphaDensity: metrics.alphaDensity,
+    boxArea: metrics.boxArea,
+    boxRatio: metrics.boxRatio,
+  };
+}
+
+function splitComponentBox(component, imageData, pad, strength = "strong") {
+  const settings = getSplitSettings(strength);
+  const coreThreshold = Math.max(settings.coreBase, Number(els.alphaThreshold.value) + 16);
+  const coreMask = createAlphaMask(imageData, coreThreshold);
+  const minArea = Math.max(6, Math.round(Number(els.minArea.value) * settings.minCoreFactor));
+  return splitLargeComponent(component, imageData, coreMask, imageData.width, imageData.height, minArea, pad, settings);
+}
+
+function findCoreSeedsInBox(mask, width, height, box, minArea) {
+  const visited = new Uint8Array(mask.length);
+  const seeds = [];
+  const stack = [];
+  const startX = Math.max(0, Math.floor(box.x));
+  const startY = Math.max(0, Math.floor(box.y));
+  const endX = Math.min(width, Math.ceil(box.x + box.width));
+  const endY = Math.min(height, Math.ceil(box.y + box.height));
+
+  for (let y = startY; y < endY; y += 1) {
+    for (let x = startX; x < endX; x += 1) {
+      const start = y * width + x;
+      if (visited[start] || !mask[start]) continue;
+      let minX = x;
+      let minY = y;
+      let maxX = x;
+      let maxY = y;
+      let area = 0;
+      visited[start] = 1;
+      stack.push(start);
+
+      while (stack.length) {
+        const index = stack.pop();
+        const px = index % width;
+        const py = Math.floor(index / width);
+        area += 1;
+        if (px < minX) minX = px;
+        if (px > maxX) maxX = px;
+        if (py < minY) minY = py;
+        if (py > maxY) maxY = py;
+        const neighbors = [index - 1, index + 1, index - width, index + width];
+        for (const next of neighbors) {
+          if (next < 0 || next >= mask.length || visited[next] || !mask[next]) continue;
+          const nx = next % width;
+          const ny = Math.floor(next / width);
+          if (nx < startX || nx >= endX || ny < startY || ny >= endY) continue;
+          if ((next === index - 1 && px === 0) || (next === index + 1 && px === width - 1)) continue;
+          visited[next] = 1;
+          stack.push(next);
+        }
+      }
+
+      if (area >= minArea) seeds.push({ id: seeds.length + 1, area, x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 });
+    }
+  }
+
+  return seeds;
+}
+
+function absorbTinyMultiObjectFragments(components, imageArea, minArea) {
+  const sorted = [...components].sort((a, b) => b.area - a.area);
+  const large = sorted.filter((component) => component.area >= Math.max(minArea, imageArea * 0.0012));
+  const output = large.map((component) => ({ ...component }));
+  const absorbDistance = Math.max(6, Math.round(Math.sqrt(imageArea) / 90));
+
+  for (const component of sorted) {
+    if (large.includes(component)) continue;
+    const target = output
+      .map((candidate) => ({ candidate, distance: boxDistance(component, candidate) }))
+      .filter((entry) => entry.distance <= absorbDistance)
+      .sort((a, b) => a.distance - b.distance)[0]?.candidate;
+    if (target) mergeBoxInto(target, component);
+    else output.push({ ...component });
+  }
+
+  return output;
+}
+
+function mergeAssetFragments(components, imageData, alphaThreshold, settings = getSplitSettings()) {
+  let boxes = components.map((component) => ({ ...component }));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    outer: for (let i = 0; i < boxes.length; i += 1) {
+      for (let j = i + 1; j < boxes.length; j += 1) {
+        if (shouldMergeAssetBoxes(boxes[i], boxes[j], imageData, alphaThreshold, settings)) {
+          mergeBoxInto(boxes[i], boxes[j]);
+          boxes.splice(j, 1);
+          changed = true;
+          break outer;
+        }
+      }
+    }
+  }
+  return boxes;
+}
+
+function shouldMergeAssetBoxes(a, b, imageData, alphaThreshold, settings = getSplitSettings()) {
+  const distance = boxDistance(a, b);
+  const smallerArea = Math.min(a.area, b.area);
+  const imageArea = imageData.width * imageData.height;
+  const bothMeaningful = a.area > imageArea * 0.003 && b.area > imageArea * 0.003;
+  const overlapRatio = boxOverlapRatio(a, b);
+  if (bothMeaningful && settings.mergeDistance <= 4 && overlapRatio < 0.22) return false;
+  if (bothMeaningful && settings.mergeDistance <= 6 && distance > 0 && overlapRatio < 0.14) return false;
+  if (bothMeaningful && hasTransparentSeparator(a, b, imageData, alphaThreshold)) return false;
+  if (bothMeaningful && distance > Math.max(4, Math.min(imageData.width, imageData.height) * 0.012)) return false;
+  if (distance > Math.max(10, Math.min(imageData.width, imageData.height) * 0.02)) return false;
+  const merged = mergedBox(a, b);
+  const mergedMetrics = measureComponent(merged, imageData, alphaThreshold);
+  const densityA = measureComponent(a, imageData, alphaThreshold).alphaDensity;
+  const densityB = measureComponent(b, imageData, alphaThreshold).alphaDensity;
+  const weightedDensity = (densityA * a.width * a.height + densityB * b.width * b.height) / Math.max(1, a.width * a.height + b.width * b.height);
+  if (bothMeaningful && mergedMetrics.alphaDensity < weightedDensity * 0.65) return false;
+  return smallerArea < imageArea * 0.0015 || distance <= settings.mergeDistance || overlapRatio > 0.45;
+}
+
+function hasTransparentSeparator(a, b, imageData, alphaThreshold) {
+  const gap = gapRectBetweenBoxes(a, b);
+  if (!gap) return false;
+  const { width, height, data } = imageData;
+  const startX = Math.max(0, Math.floor(gap.x));
+  const startY = Math.max(0, Math.floor(gap.y));
+  const endX = Math.min(width, Math.ceil(gap.x + gap.width));
+  const endY = Math.min(height, Math.ceil(gap.y + gap.height));
+  if (endX <= startX || endY <= startY) return false;
+  let opaque = 0;
+  let total = 0;
+  for (let y = startY; y < endY; y += 1) {
+    for (let x = startX; x < endX; x += 1) {
+      total += 1;
+      if (data[(y * width + x) * 4 + 3] >= alphaThreshold) opaque += 1;
+    }
+  }
+  return total > 0 && opaque / total < 0.025;
+}
+
+function gapRectBetweenBoxes(a, b) {
+  const ax2 = a.x + a.width;
+  const ay2 = a.y + a.height;
+  const bx2 = b.x + b.width;
+  const by2 = b.y + b.height;
+  const verticalOverlap = Math.min(ay2, by2) - Math.max(a.y, b.y);
+  const horizontalOverlap = Math.min(ax2, bx2) - Math.max(a.x, b.x);
+  if (a.x <= bx2 && b.x <= ax2 && verticalOverlap > 0) return null;
+  if (a.y <= by2 && b.y <= ay2 && horizontalOverlap > 0) return null;
+  if (ax2 <= b.x || bx2 <= a.x) {
+    const left = ax2 <= b.x ? ax2 : bx2;
+    const right = ax2 <= b.x ? b.x : a.x;
+    return { x: left, y: Math.max(a.y, b.y), width: right - left, height: Math.max(1, verticalOverlap) };
+  }
+  if (ay2 <= b.y || by2 <= a.y) {
+    const top = ay2 <= b.y ? ay2 : by2;
+    const bottom = ay2 <= b.y ? b.y : a.y;
+    return { x: Math.max(a.x, b.x), y: top, width: Math.max(1, horizontalOverlap), height: bottom - top };
+  }
+  return null;
+}
+
+function mergedBox(a, b) {
+  const minX = Math.min(a.x, b.x);
+  const minY = Math.min(a.y, b.y);
+  const maxX = Math.max(a.x + a.width, b.x + b.width);
+  const maxY = Math.max(a.y + a.height, b.y + b.height);
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY, area: a.area + b.area };
+}
+
+function sortComponentsReadingOrder(components) {
+  if (!components.length) return components;
+  const averageHeight = components.reduce((sum, component) => sum + component.height, 0) / components.length;
+  return [...components].sort((a, b) => {
+    const rowA = Math.round((a.y + a.height / 2) / Math.max(1, averageHeight * 0.8));
+    const rowB = Math.round((b.y + b.height / 2) / Math.max(1, averageHeight * 0.8));
+    return rowA === rowB ? a.x - b.x : rowA - rowB;
+  });
+}
+
+function hasLikelyMultipleObjects(components, width, height) {
+  const meaningful = components.filter((component) => component.area > width * height * 0.002);
+  if (meaningful.length >= 2) return true;
+  const huge = components.find((component) => component.width * component.height > width * height * 0.35 && component.alphaDensity < 0.4);
+  return Boolean(huge);
 }
 
 function cleanAlphaMask(imageData, alphaThreshold) {
@@ -1779,9 +2653,15 @@ function renderCards() {
     remove.textContent = "删除";
     remove.addEventListener("click", () => removeComponent(component.id));
 
+    const split = document.createElement("button");
+    split.type = "button";
+    split.className = "ghost";
+    split.textContent = "拆分";
+    split.addEventListener("click", () => splitComponentById(component.id));
+
     const actions = document.createElement("div");
     actions.className = "asset-actions";
-    actions.append(button, remove);
+    actions.append(button, split, remove);
 
     card.addEventListener("mouseenter", () => {
       drawOverlay(component.id);
@@ -1891,6 +2771,36 @@ async function downloadCutout() {
   downloadBlob(blob, `${state.imageName}-cutout.${ext}`);
 }
 
+async function copyCutout() {
+  if (!state.cutoutBlob || !state.refinedCutoutCanvas.width) return;
+  if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
+    setStatus("当前浏览器不支持直接复制图片，可先下载 PNG。", "复制不可用");
+    return;
+  }
+
+  try {
+    els.copyCutoutBtn.disabled = true;
+    els.copyCutoutBtn.textContent = "复制中...";
+    const blob = await canvasToPngBlob(state.refinedCutoutCanvas);
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        "image/png": blob,
+      }),
+    ]);
+    els.copyCutoutBtn.textContent = "已复制";
+    setSuccess("已复制透明 PNG 到剪贴板，可直接粘贴到设计工具或文档。");
+    window.setTimeout(() => {
+      updateDownloadLabels();
+      els.copyCutoutBtn.disabled = !state.cutoutBlob;
+    }, 1200);
+  } catch (error) {
+    console.error(error);
+    els.copyCutoutBtn.disabled = false;
+    updateDownloadLabels();
+    setStatus("复制失败：浏览器可能需要在安全上下文或用户授权后才能写入图片剪贴板。", "复制失败");
+  }
+}
+
 async function downloadZip() {
   if (!state.components.length) return;
   setBusy(true, "正在打包 ZIP...");
@@ -1940,13 +2850,87 @@ function clearComponentSelection() {
   drawOverlay();
 }
 
+function renumberComponents(components) {
+  return sortComponentsReadingOrder(components)
+    .map((component, index) => ({ ...component, id: index + 1 }));
+}
+
+function persistComponents(message = `${state.components.length} 个元素`) {
+  state.components = renumberComponents(state.components);
+  state.selectedComponentIds = new Set([...state.selectedComponentIds].filter((id) => state.components.some((component) => component.id === id)));
+  if (state.currentItem) {
+    state.currentItem.components = [...state.components];
+    state.currentItem.message = message;
+  }
+  els.downloadZipBtn.disabled = state.components.length === 0 || state.components.length > 50;
+  renderQueue();
+}
+
+function splitSelectedComponent() {
+  const selected = [...state.selectedComponentIds];
+  if (selected.length !== 1) return;
+  splitComponentById(selected[0]);
+}
+
+function splitComponentById(componentId) {
+  const component = state.components.find((candidate) => candidate.id === componentId);
+  if (!component || !state.refinedCutoutCanvas.width) return;
+  const detection = createDetectionImageData(state.refinedCutoutCanvas, 1024);
+  const scaleX = detection.width / Math.max(1, els.resultCanvas.width);
+  const scaleY = detection.height / Math.max(1, els.resultCanvas.height);
+  const lowComponent = {
+    ...component,
+    x: component.x * scaleX,
+    y: component.y * scaleY,
+    width: component.width * scaleX,
+    height: component.height * scaleY,
+  };
+  const paddingLow = Math.max(1, Math.round(Number(els.padding.value) * detection.scale));
+  const childrenLow = splitComponentBox(lowComponent, detection.imageData, paddingLow, "strong");
+  const children = mapComponentsToCanvas(childrenLow, detection, els.resultCanvas.width, els.resultCanvas.height, Number(els.padding.value));
+  if (children.length < 2) {
+    setStatus("未找到明确分割缝隙，可尝试手动框选。", "拆分失败");
+    return;
+  }
+
+  const rest = state.components.filter((candidate) => candidate.id !== componentId);
+  state.components = renumberComponents([...rest, ...children]);
+  state.selectedComponentIds = new Set(
+    state.components
+      .filter((component) => children.some((child) => sameBox(component, child)))
+      .map((component) => component.id),
+  );
+  persistComponents(`已拆分为 ${state.components.length} 个元素`);
+  renderCards();
+  drawOverlay();
+  setSuccess(`已将元素 ${String(componentId).padStart(2, "0")} 拆成 ${children.length} 个子元素。`);
+}
+
+function mergeSelectedComponents() {
+  const selected = state.components.filter((component) => state.selectedComponentIds.has(component.id));
+  if (selected.length < 2) return;
+  const merged = selected.reduce((target, component) => {
+    mergeBoxInto(target, component);
+    return target;
+  }, { ...selected[0] });
+  const rest = state.components.filter((component) => !state.selectedComponentIds.has(component.id));
+  state.components = renumberComponents([...rest, merged]);
+  const mergedId = state.components.find((component) => component.x === merged.x && component.y === merged.y && component.width === merged.width && component.height === merged.height)?.id;
+  state.selectedComponentIds = mergedId ? new Set([mergedId]) : new Set();
+  persistComponents(`已合并为 ${state.components.length} 个元素`);
+  renderCards();
+  drawOverlay();
+  setSuccess(`已合并 ${selected.length} 个元素。`);
+}
+
+function sameBox(a, b) {
+  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+}
+
 function removeComponent(componentId) {
   state.components = state.components.filter((component) => component.id !== componentId);
   state.selectedComponentIds.delete(componentId);
-  if (state.currentItem) {
-    state.currentItem.components = [...state.components];
-    state.currentItem.message = `${state.components.length} 个元素`;
-  }
+  persistComponents(`${state.components.length} 个元素`);
   renderCards();
   drawOverlay();
   updateSelectionButtons();
@@ -1960,6 +2944,8 @@ function updateSelectionButtons() {
   const selectedCount = state.selectedComponentIds.size;
   els.selectAllBtn.disabled = !hasComponents;
   els.clearSelectionBtn.disabled = !hasComponents || selectedCount === 0;
+  els.splitSelectedBtn.disabled = state.processing || tooMany || selectedCount !== 1;
+  els.mergeSelectedBtn.disabled = state.processing || tooMany || selectedCount < 2;
   els.downloadSelectedZipBtn.disabled = state.processing || tooMany || selectedCount === 0;
   els.downloadSelectedZipBtn.textContent = tooMany
     ? "碎片过多，暂不打包"
@@ -1971,16 +2957,53 @@ function updateSelectionButtons() {
 async function downloadBatchZip() {
   if (!state.queue.length || state.batchRunning) return;
   state.batchRunning = true;
+  const report = {
+    startedAt: new Date().toISOString(),
+    mode: els.detectMode.value,
+    splitStrength: els.splitStrength.value,
+    format: getExportSettings().ext,
+    scale: getExportScale(),
+    total: state.queue.length,
+    rows: [],
+    exportedImages: 0,
+    exportedElements: 0,
+    status: "running",
+  };
+  state.lastBatchReport = report;
+  window.__cutoutQaLastRun = report;
   updateBatchButton();
 
   try {
     const total = state.queue.length;
     for (let index = 0; index < state.queue.length; index += 1) {
       const item = state.queue[index];
-      if (item.status === "done" && item.cutoutBlob) continue;
+      const row = {
+        index: index + 1,
+        name: item.originalName,
+        isQa: Boolean(item.isQa),
+        startedAt: new Date().toISOString(),
+        reused: item.status === "done" && Boolean(item.cutoutBlob),
+        status: "processing",
+        elements: 0,
+        sourceSize: item.originalWidth && item.originalHeight ? `${item.originalWidth}x${item.originalHeight}` : "",
+        resultSize: item.resultWidth && item.resultHeight ? `${item.resultWidth}x${item.resultHeight}` : "",
+        error: "",
+      };
+      report.rows.push(row);
+      if (item.status === "done" && item.cutoutBlob) {
+        row.status = "done";
+        row.elements = item.components?.length || 0;
+        row.resultSize = item.resultWidth && item.resultHeight ? `${item.resultWidth}x${item.resultHeight}` : "";
+        continue;
+      }
       setProgress(Math.round((index / total) * 100), `${index + 1} / ${total}`);
       await loadItem(item);
       await processImage({ message: `批量处理中：${index + 1}/${total} ${item.originalName}` });
+      row.status = item.status || "unknown";
+      row.elements = item.components?.length || 0;
+      row.sourceSize = item.originalWidth && item.originalHeight ? `${item.originalWidth}x${item.originalHeight}` : "";
+      row.resultSize = item.resultWidth && item.resultHeight ? `${item.resultWidth}x${item.resultHeight}` : "";
+      row.error = item.error?.message || "";
     }
     setProgress(100, `${total} / ${total}`);
 
@@ -2005,13 +3028,25 @@ async function downloadBatchZip() {
     }
 
     if (!exportedImages) {
+      report.status = "failed";
+      report.finishedAt = new Date().toISOString();
       setError("没有可打包的处理结果。");
       return;
     }
 
     const zipBlob = await zip.generateAsync({ type: "blob" });
     downloadBlob(zipBlob, `cutout-batch-${formatDateStamp()}.zip`);
+    report.exportedImages = exportedImages;
+    report.exportedElements = exportedElements;
+    report.status = "done";
+    report.finishedAt = new Date().toISOString();
     setStatus(`批量 ZIP 已生成：${exportedImages} 张图片，${exportedElements} 个元素。`);
+  } catch (error) {
+    report.status = "failed";
+    report.finishedAt = new Date().toISOString();
+    report.error = error?.message || String(error);
+    console.error(error);
+    setError(`批量处理失败：${report.error}`);
   } finally {
     state.batchRunning = false;
     setBusy(false);
@@ -2251,6 +3286,7 @@ function setStatus(message, title = "状态") {
 function setBusy(isBusy, message) {
   document.body.style.cursor = isBusy ? "progress" : "";
   state.processing = isBusy;
+  els.cancelBtn.hidden = !isBusy;
   if (message) {
     els.statusTitle.textContent = isBusy ? "正在处理" : "状态";
     els.statusCard.className = `status-card${isBusy ? " busy" : ""}`;
@@ -2260,6 +3296,7 @@ function setBusy(isBusy, message) {
   els.processBtn.textContent = isBusy ? "处理中..." : "开始自动抠图";
   els.processBtn.disabled = isBusy || !state.file;
   els.rescanBtn.disabled = isBusy || !state.cutoutBlob;
+  els.copyCutoutBtn.disabled = isBusy || !state.cutoutBlob;
   els.downloadCutoutBtn.disabled = isBusy || !state.cutoutBlob;
   els.downloadZipBtn.disabled = isBusy || !state.components.length;
   updateBatchButton();
@@ -2333,6 +3370,10 @@ function downloadBlob(blob, fileName) {
 }
 
 function canvasToBlob(canvas) {
+  return canvasToPngBlob(canvas);
+}
+
+function canvasToPngBlob(canvas) {
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {
       if (blob) resolve(blob);
@@ -2369,7 +3410,7 @@ function scaleCanvasForExport(sourceCanvas, scale = 1) {
 function canvasToExportBlob(canvas) {
   const { ext, mime, label } = getExportSettings();
   if (ext === "svg") {
-    return Promise.resolve(canvasToSvgBlob(canvas));
+    return Promise.resolve(canvasToVectorSvgBlob(canvas));
   }
 
   return new Promise((resolve, reject) => {
@@ -2384,10 +3425,205 @@ function canvasToExportBlob(canvas) {
   });
 }
 
-function canvasToSvgBlob(canvas) {
-  const dataUrl = canvas.toDataURL("image/png");
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${canvas.width}" height="${canvas.height}" viewBox="0 0 ${canvas.width} ${canvas.height}"><image href="${dataUrl}" width="${canvas.width}" height="${canvas.height}" preserveAspectRatio="none"/></svg>`;
+function canvasToVectorSvgBlob(canvas) {
+  const source = prepareVectorCanvas(canvas);
+  const ctx = source.getContext("2d", { willReadFrequently: true });
+  const imageData = ctx.getImageData(0, 0, source.width, source.height);
+  const alphaThreshold = Math.max(8, Number(els.cleanup.value) || 24);
+  const groups = imageDataToVectorRegions(imageData, alphaThreshold);
+  const paths = [...groups.entries()]
+    .sort((a, b) => b[1].area - a[1].area)
+    .map(([key, group]) => {
+      const [fill, opacity] = key.split("|");
+      const opacityAttr = opacity === "1" ? "" : ` fill-opacity="${opacity}"`;
+      return `<path fill="${fill}"${opacityAttr} fill-rule="evenodd" d="${group.path}"/>`;
+    })
+    .join("");
+  const svg = [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${canvas.width}" height="${canvas.height}" viewBox="0 0 ${source.width} ${source.height}" shape-rendering="geometricPrecision">`,
+    `<title>Vectorized cutout</title>`,
+    `<desc>Generated as editable SVG color paths. Best for flat illustrations, logos, icons, and stickers.</desc>`,
+    paths || "<path/>",
+    "</svg>",
+  ].join("");
   return new Blob([svg], { type: "image/svg+xml" });
+}
+
+function prepareVectorCanvas(canvas) {
+  const maxVectorEdge = 900;
+  const scale = Math.min(1, maxVectorEdge / Math.max(canvas.width, canvas.height));
+  if (scale >= 1) return canvas;
+  const vectorCanvas = document.createElement("canvas");
+  vectorCanvas.width = Math.max(1, Math.round(canvas.width * scale));
+  vectorCanvas.height = Math.max(1, Math.round(canvas.height * scale));
+  const ctx = vectorCanvas.getContext("2d");
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(canvas, 0, 0, vectorCanvas.width, vectorCanvas.height);
+  return vectorCanvas;
+}
+
+function imageDataToVectorRegions(imageData, alphaThreshold) {
+  const { width, height, data } = imageData;
+  const groups = new Map();
+  const colorStep = 32;
+  const keys = new Array(width * height);
+  const visited = new Uint8Array(width * height);
+  const stack = [];
+  const minRegionArea = Math.max(5, Math.round((width * height) * 0.000008));
+
+  for (let index = 0; index < keys.length; index += 1) {
+    const offset = index * 4;
+    if (data[offset + 3] <= alphaThreshold) continue;
+    keys[index] = vectorColorKey(data[offset], data[offset + 1], data[offset + 2], data[offset + 3], colorStep);
+  }
+
+  for (let index = 0; index < keys.length; index += 1) {
+    const key = keys[index];
+    if (!key || visited[index]) continue;
+
+    const pixels = [];
+    visited[index] = 1;
+    stack.push(index);
+
+    while (stack.length) {
+      const current = stack.pop();
+      pixels.push(current);
+      const x = current % width;
+      const y = Math.floor(current / width);
+      const neighbors = [
+        x > 0 ? current - 1 : -1,
+        x < width - 1 ? current + 1 : -1,
+        y > 0 ? current - width : -1,
+        y < height - 1 ? current + width : -1,
+      ];
+      for (const next of neighbors) {
+        if (next < 0 || visited[next] || keys[next] !== key) continue;
+        visited[next] = 1;
+        stack.push(next);
+      }
+    }
+
+    if (pixels.length < minRegionArea) continue;
+    appendVectorRegion(groups, key, pixels, keys, width, height);
+  }
+
+  return groups;
+}
+
+function vectorColorKey(red, green, blue, alpha, step) {
+  const r = quantizeChannel(red, step);
+  const g = quantizeChannel(green, step);
+  const b = quantizeChannel(blue, step);
+  const opacity = alpha >= 248 ? "1" : (Math.round((alpha / 255) * 10) / 10).toFixed(1);
+  return `${rgbToHex(r, g, b)}|${opacity}`;
+}
+
+function appendVectorRegion(groups, key, pixels, keys, width, height) {
+  let group = groups.get(key);
+  if (!group) {
+    group = { path: "", area: 0 };
+    groups.set(key, group);
+  }
+  const loops = traceRegionLoops(pixels, keys, key, width, height);
+  const path = loops.map((loop) => loopToPath(loop)).join("");
+  if (!path) return;
+  group.path += path;
+  group.area += pixels.length;
+}
+
+function traceRegionLoops(pixels, keys, key, width, height) {
+  const edges = [];
+  for (const index of pixels) {
+    const x = index % width;
+    const y = Math.floor(index / width);
+    if (y === 0 || keys[index - width] !== key) edges.push(createVectorEdge(x, y, x + 1, y));
+    if (x === width - 1 || keys[index + 1] !== key) edges.push(createVectorEdge(x + 1, y, x + 1, y + 1));
+    if (y === height - 1 || keys[index + width] !== key) edges.push(createVectorEdge(x + 1, y + 1, x, y + 1));
+    if (x === 0 || keys[index - 1] !== key) edges.push(createVectorEdge(x, y + 1, x, y));
+  }
+
+  const edgesByStart = new Map();
+  for (const edge of edges) {
+    const list = edgesByStart.get(edge.start) || [];
+    list.push(edge);
+    edgesByStart.set(edge.start, list);
+  }
+
+  const loops = [];
+  for (const edge of edges) {
+    if (edge.used) continue;
+    const loop = [[edge.x1, edge.y1]];
+    let current = edge;
+    current.used = true;
+
+    for (let guard = 0; guard < edges.length + 4; guard += 1) {
+      loop.push([current.x2, current.y2]);
+      if (current.end === edge.start) break;
+      const candidates = edgesByStart.get(current.end) || [];
+      const next = candidates.find((candidate) => !candidate.used);
+      if (!next) break;
+      next.used = true;
+      current = next;
+    }
+
+    if (loop.length >= 4 && sameVectorPoint(loop[0], loop[loop.length - 1])) {
+      loops.push(simplifyOrthogonalLoop(loop));
+    }
+  }
+
+  return loops;
+}
+
+function createVectorEdge(x1, y1, x2, y2) {
+  return {
+    x1,
+    y1,
+    x2,
+    y2,
+    start: `${x1},${y1}`,
+    end: `${x2},${y2}`,
+    used: false,
+  };
+}
+
+function simplifyOrthogonalLoop(points) {
+  const closed = sameVectorPoint(points[0], points[points.length - 1]);
+  const source = closed ? points.slice(0, -1) : points;
+  if (source.length <= 3) return points;
+  const simplified = [];
+  for (let index = 0; index < source.length; index += 1) {
+    const prev = source[(index - 1 + source.length) % source.length];
+    const point = source[index];
+    const next = source[(index + 1) % source.length];
+    const collinear = (prev[0] === point[0] && point[0] === next[0]) || (prev[1] === point[1] && point[1] === next[1]);
+    if (!collinear) simplified.push(point);
+  }
+  simplified.push(simplified[0]);
+  return simplified;
+}
+
+function loopToPath(loop) {
+  if (loop.length < 4) return "";
+  const start = loop[0];
+  let d = `M${start[0]} ${start[1]}`;
+  for (let index = 1; index < loop.length - 1; index += 1) {
+    const point = loop[index];
+    d += `L${point[0]} ${point[1]}`;
+  }
+  return `${d}Z`;
+}
+
+function sameVectorPoint(a, b) {
+  return a[0] === b[0] && a[1] === b[1];
+}
+
+function quantizeChannel(value, step) {
+  return clamp(Math.round(value / step) * step, 0, 255);
+}
+
+function rgbToHex(red, green, blue) {
+  return `#${[red, green, blue].map((value) => value.toString(16).padStart(2, "0")).join("")}`;
 }
 
 function clamp(value, min, max) {
