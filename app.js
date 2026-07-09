@@ -1460,7 +1460,8 @@ function guidedSmoothEdgeAlpha(imageData, settings = {}) {
 }
 
 function suppressWhiteFringeAlpha(imageData, settings = {}) {
-  if (settings.imageType !== "product") return imageData;
+  const illustrationLike = settings.imageType === "illustration" || settings.imageType === "sticker" || settings.imageType === "line-art";
+  if (settings.imageType !== "product" && !illustrationLike) return imageData;
   const { width, height, data } = imageData;
   const source = new Uint8ClampedArray(data);
   const preserveMultiplier = settings.fidelity === "preserve" ? 0.78 : 1;
@@ -1483,9 +1484,14 @@ function suppressWhiteFringeAlpha(imageData, settings = {}) {
           if (metrics.lightness < 228 || metrics.saturation > 0.18) coloredCount += 1;
         }
       }
+      const lowAlphaIllustrationFringe = illustrationLike
+        && alpha < 28
+        && hasTransparentNeighbor(source, width, height, x, y, 2, settings.edgeLow || 16)
+        && hasColoredOpaqueNeighbor(source, width, height, x, y, 3, 128)
+        && !hasLightOpaqueNeighbor(source, width, height, x, y, 2, 176);
       const fringeStrength = whiteFringeAlphaStrength(settings, alpha, transparentCount, coloredCount);
-      if (fringeStrength > 0) {
-        data[offset + 3] = Math.round(alpha * fringeStrength * preserveMultiplier);
+      if (lowAlphaIllustrationFringe || fringeStrength > 0) {
+        data[offset + 3] = lowAlphaIllustrationFringe ? 0 : Math.round(alpha * fringeStrength * preserveMultiplier);
       }
     }
   }

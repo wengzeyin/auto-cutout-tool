@@ -268,7 +268,8 @@ function guidedSmoothEdgeAlpha(image, settings = {}) {
 }
 
 function suppressWhiteFringeAlpha(image, settings = {}) {
-  if (settings.imageType !== "product") return image;
+  const illustrationLike = settings.imageType === "illustration" || settings.imageType === "sticker" || settings.imageType === "line-art";
+  if (settings.imageType !== "product" && !illustrationLike) return image;
   const source = new Uint8ClampedArray(image.data);
   const preserveMultiplier = settings.fidelity === "preserve" ? 0.78 : 1;
   for (let y = 1; y < height - 1; y += 1) {
@@ -290,13 +291,63 @@ function suppressWhiteFringeAlpha(image, settings = {}) {
           if (metrics.lightness < 228 || metrics.saturation > 0.18) coloredCount += 1;
         }
       }
+      const lowAlphaIllustrationFringe = illustrationLike
+        && alpha < 28
+        && hasTransparentNeighbor(source, x, y, 2, settings.edgeLow || 16)
+        && hasColoredOpaqueNeighbor(source, x, y, 3, 128)
+        && !hasLightOpaqueNeighbor(source, x, y, 2, 176);
       const fringeStrength = whiteFringeAlphaStrength(settings, alpha, transparentCount, coloredCount);
-      if (fringeStrength > 0) {
-        image.data[offset + 3] = Math.round(alpha * fringeStrength * preserveMultiplier);
+      if (lowAlphaIllustrationFringe || fringeStrength > 0) {
+        image.data[offset + 3] = lowAlphaIllustrationFringe ? 0 : Math.round(alpha * fringeStrength * preserveMultiplier);
       }
     }
   }
   return image;
+}
+
+function hasColoredOpaqueNeighbor(data, x, y, radius, threshold) {
+  for (let oy = -radius; oy <= radius; oy += 1) {
+    const py = y + oy;
+    if (py < 0 || py >= height) continue;
+    for (let ox = -radius; ox <= radius; ox += 1) {
+      const px = x + ox;
+      if (px < 0 || px >= width || (px === x && py === y)) continue;
+      const offset = (py * width + px) * 4;
+      if (data[offset + 3] <= threshold) continue;
+      const metrics = colorMetrics(data[offset], data[offset + 1], data[offset + 2]);
+      if (metrics.lightness < 226 || metrics.saturation > 0.18) return true;
+    }
+  }
+  return false;
+}
+
+function hasLightOpaqueNeighbor(data, x, y, radius, threshold) {
+  for (let oy = -radius; oy <= radius; oy += 1) {
+    const py = y + oy;
+    if (py < 0 || py >= height) continue;
+    for (let ox = -radius; ox <= radius; ox += 1) {
+      const px = x + ox;
+      if (px < 0 || px >= width || (px === x && py === y)) continue;
+      const offset = (py * width + px) * 4;
+      if (data[offset + 3] <= threshold) continue;
+      const metrics = colorMetrics(data[offset], data[offset + 1], data[offset + 2]);
+      if (metrics.lightness > 228 && metrics.saturation < 0.16) return true;
+    }
+  }
+  return false;
+}
+
+function hasTransparentNeighbor(data, x, y, radius, threshold) {
+  for (let oy = -radius; oy <= radius; oy += 1) {
+    const py = y + oy;
+    if (py < 0 || py >= height) continue;
+    for (let ox = -radius; ox <= radius; ox += 1) {
+      const px = x + ox;
+      if (px < 0 || px >= width || (px === x && py === y)) continue;
+      if (data[(py * width + px) * 4 + 3] <= threshold) return true;
+    }
+  }
+  return false;
 }
 
 function antiAliasHardEdges(image, settings = {}) {
@@ -700,6 +751,19 @@ for (let y = 34; y <= 86; y += 1) {
 const stickerFringeAfter = makeImageData([255, 255, 255, 0]);
 stickerFringeAfter.data.set(stickerFringeBefore.data);
 defringe(stickerFringeAfter, { imageType: "sticker", fidelity: "balanced" });
+const lowAlphaStickerBefore = makeImageData([255, 255, 255, 0]);
+for (let y = 26; y <= 82; y += 1) {
+  for (let x = 36; x <= 86; x += 1) setPixel(lowAlphaStickerBefore, x, y, [64, 190, 130, 255]);
+  setPixel(lowAlphaStickerBefore, 35, y, [252, 252, 250, 18]);
+  setPixel(lowAlphaStickerBefore, 87, y, [252, 252, 250, 18]);
+}
+for (let y = 44; y <= 54; y += 1) {
+  for (let x = 58; x <= 68; x += 1) setPixel(lowAlphaStickerBefore, x, y, [252, 252, 250, 220]);
+  setPixel(lowAlphaStickerBefore, 57, y, [252, 252, 250, 18]);
+}
+const lowAlphaStickerAfter = makeImageData([255, 255, 255, 0]);
+lowAlphaStickerAfter.data.set(lowAlphaStickerBefore.data);
+suppressWhiteFringeAlpha(lowAlphaStickerAfter, { imageType: "sticker", fidelity: "balanced" });
 const semiCoreBefore = makeImageData([255, 255, 255, 0]);
 fillRect(semiCoreBefore, 22, 22, 42, 42, [80, 120, 160, 255]);
 fillRect(semiCoreBefore, 28, 28, 36, 36, [80, 120, 160, 118]);
@@ -724,6 +788,10 @@ const metrics = {
   guidedNoiseAfter: averageAlphaInRect(guidedAfter, 94, 24, 94, 96),
   stickerFringeBefore: averageAlphaInRect(stickerFringeBefore, 33, 34, 33, 86),
   stickerFringeAfter: averageAlphaInRect(stickerFringeAfter, 33, 34, 33, 86),
+  lowAlphaStickerFringeBefore: averageAlphaInRect(lowAlphaStickerBefore, 35, 26, 35, 82),
+  lowAlphaStickerFringeAfter: averageAlphaInRect(lowAlphaStickerAfter, 35, 26, 35, 82),
+  lowAlphaStickerInteriorBefore: averageAlphaInRect(lowAlphaStickerBefore, 57, 44, 57, 54),
+  lowAlphaStickerInteriorAfter: averageAlphaInRect(lowAlphaStickerAfter, 57, 44, 57, 54),
   semiCoreBefore: averageAlphaInRect(semiCoreBefore, 28, 28, 36, 36),
   semiCoreAfter: averageAlphaInRect(semiCoreAfter, 28, 28, 36, 36),
   semiEdgeAfter: averageAlphaInRect(semiCoreAfter, 72, 24, 88, 36),
@@ -753,6 +821,8 @@ if (metrics.jaggedAfter >= metrics.jaggedBefore * 0.7) failures.push(`jagged edg
 if (metrics.guidedAfter <= metrics.guidedBefore + 10) failures.push(`guided edge alpha did not move toward similar solid neighbor: ${metrics.guidedBefore.toFixed(1)} -> ${metrics.guidedAfter.toFixed(1)}`);
 if (metrics.guidedNoiseAfter > 45) failures.push(`guided smoothing leaked into dissimilar noise: ${metrics.guidedNoiseAfter.toFixed(1)}`);
 if (metrics.stickerFringeAfter >= metrics.stickerFringeBefore * 0.45) failures.push(`sticker white fringe not reduced enough: ${metrics.stickerFringeBefore.toFixed(1)} -> ${metrics.stickerFringeAfter.toFixed(1)}`);
+if (metrics.lowAlphaStickerFringeAfter > 1) failures.push(`low alpha sticker fringe not cleared: ${metrics.lowAlphaStickerFringeBefore.toFixed(1)} -> ${metrics.lowAlphaStickerFringeAfter.toFixed(1)}`);
+if (metrics.lowAlphaStickerInteriorAfter < metrics.lowAlphaStickerInteriorBefore * 0.7) failures.push(`interior white sticker detail over-cleared: ${metrics.lowAlphaStickerInteriorBefore.toFixed(1)} -> ${metrics.lowAlphaStickerInteriorAfter.toFixed(1)}`);
 if (metrics.semiCoreAfter < 250) failures.push(`semi-transparent core not normalized: ${metrics.semiCoreBefore.toFixed(1)} -> ${metrics.semiCoreAfter.toFixed(1)}`);
 if (metrics.semiEdgeAfter > 145) failures.push(`isolated semi-transparent edge was over-normalized: ${metrics.semiEdgeAfter.toFixed(1)}`);
 if (metrics.residueAlpha > 1) failures.push(`background residue remains: ${metrics.residueAlpha.toFixed(1)}`);
