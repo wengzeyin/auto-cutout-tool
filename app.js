@@ -1630,15 +1630,22 @@ function restoreIllustrationDetails(cutoutCanvas, originalCanvas, settings) {
     const y = Math.floor(index / width);
     const protectedInteriorWhite = nearWhite
       && shouldProtectInteriorWhite(settings)
-      && isInteriorLightDetail(result.data, width, height, x, y, 4, 128);
+      && (
+        isInteriorLightDetail(result.data, width, height, x, y, 4, 128)
+        || isOriginalEnclosedLightDetail(original.data, width, height, x, y, 7)
+      );
     if (nearWhite && !protectedInteriorWhite) continue;
 
     const darkStroke = protectLineArt(metrics, settings);
     const coloredFill = metrics.saturation > 0.24 && metrics.lightness < 242;
     const protectedLightFill = protectLightRegion(red, green, blue, metrics, settings);
     const protectedWarmOrCool = protectWarmCoolDetail(red, green, blue, metrics, settings);
+    const protectedPaleInterior = settings.preserveLightRegions
+      && metrics.lightness >= 224
+      && metrics.lightness < 248
+      && isOriginalEnclosedLightDetail(original.data, width, height, x, y, 7);
 
-    if (alpha > 18 && (darkStroke || coloredFill || protectedLightFill || protectedWarmOrCool || protectedInteriorWhite)) {
+    if (alpha > 18 && (darkStroke || coloredFill || protectedLightFill || protectedWarmOrCool || protectedInteriorWhite || protectedPaleInterior)) {
       result.data[offset] = red;
       result.data[offset + 1] = green;
       result.data[offset + 2] = blue;
@@ -1685,6 +1692,12 @@ function restoreIllustrationDetails(cutoutCanvas, originalCanvas, settings) {
       result.data[offset + 1] = green;
       result.data[offset + 2] = blue;
       result.data[offset + 3] = 92;
+      restoredPixels += 1;
+    } else if (protectedPaleInterior && alpha < 132 && hasOpaqueNeighbor(result.data, width, height, x, y, 5, 72)) {
+      result.data[offset] = red;
+      result.data[offset + 1] = green;
+      result.data[offset + 2] = blue;
+      result.data[offset + 3] = Math.max(alpha, protectedInteriorWhite ? 210 : 150);
       restoredPixels += 1;
     } else if (protectedInteriorWhite && alpha < 190) {
       result.data[offset] = red;
@@ -1747,6 +1760,38 @@ function isInteriorLightDetail(data, width, height, x, y, radius, threshold) {
     }
   }
   return total >= 16 && buckets.left >= 3 && buckets.right >= 3 && buckets.up >= 3 && buckets.down >= 3;
+}
+
+function isOriginalEnclosedLightDetail(originalData, width, height, x, y, radius) {
+  const buckets = { left: 0, right: 0, up: 0, down: 0 };
+  let anchors = 0;
+  let directions = 0;
+  for (let oy = -radius; oy <= radius; oy += 1) {
+    const py = y + oy;
+    if (py < 0 || py >= height) continue;
+    for (let ox = -radius; ox <= radius; ox += 1) {
+      const px = x + ox;
+      if (px < 0 || px >= width || (px === x && py === y)) continue;
+      const distance = Math.max(Math.abs(ox), Math.abs(oy));
+      if (distance < 2 || distance > radius) continue;
+      const offset = (py * width + px) * 4;
+      const metrics = colorMetrics(originalData[offset], originalData[offset + 1], originalData[offset + 2]);
+      const lineOrColoredShape = metrics.lightness < 190 || metrics.saturation > 0.14;
+      if (!lineOrColoredShape) continue;
+      anchors += 1;
+      if (ox <= -2) buckets.left += 1;
+      if (ox >= 2) buckets.right += 1;
+      if (oy <= -2) buckets.up += 1;
+      if (oy >= 2) buckets.down += 1;
+    }
+  }
+  if (buckets.left >= 2) directions += 1;
+  if (buckets.right >= 2) directions += 1;
+  if (buckets.up >= 2) directions += 1;
+  if (buckets.down >= 2) directions += 1;
+  const enclosedHorizontally = buckets.left >= 2 && buckets.right >= 2;
+  const enclosedVertically = buckets.up >= 2 && buckets.down >= 2;
+  return anchors >= 8 && directions >= 3 && enclosedHorizontally && enclosedVertically;
 }
 
 function hasDirectionalAlphaSupport(data, width, height, x, y, radius, threshold) {
@@ -1901,7 +1946,13 @@ function computeMatteMetrics(cutoutData, originalData, settings = {}) {
       if (!nearForeground) continue;
 
       const lineCandidate = metrics.lightness < 118 && metrics.saturation < 0.82;
-      const lightCandidate = metrics.lightness > 168 && metrics.lightness < 246 && metrics.saturation > 0.055;
+      const protectedInteriorLightCandidate = shouldProtectInteriorWhite(settings)
+        && metrics.lightness > 230
+        && metrics.lightness < 252
+        && metrics.saturation < 0.18
+        && isOriginalEnclosedLightDetail(original, width, height, x, y, 7);
+      const lightCandidate = (metrics.lightness > 168 && metrics.lightness < 246 && metrics.saturation > 0.055)
+        || protectedInteriorLightCandidate;
       if (lineCandidate) {
         possibleLine += 1;
         if (alpha < 80) lostLine += 1;

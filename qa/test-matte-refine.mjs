@@ -109,6 +109,38 @@ function isInteriorLightDetail(data, x, y, radius, threshold) {
   return total >= 16 && buckets.left >= 3 && buckets.right >= 3 && buckets.up >= 3 && buckets.down >= 3;
 }
 
+function isOriginalEnclosedLightDetail(originalData, x, y, radius) {
+  const buckets = { left: 0, right: 0, up: 0, down: 0 };
+  let anchors = 0;
+  let directions = 0;
+  for (let oy = -radius; oy <= radius; oy += 1) {
+    const py = y + oy;
+    if (py < 0 || py >= height) continue;
+    for (let ox = -radius; ox <= radius; ox += 1) {
+      const px = x + ox;
+      if (px < 0 || px >= width || (px === x && py === y)) continue;
+      const distance = Math.max(Math.abs(ox), Math.abs(oy));
+      if (distance < 2 || distance > radius) continue;
+      const offset = (py * width + px) * 4;
+      const metrics = colorMetrics(originalData[offset], originalData[offset + 1], originalData[offset + 2]);
+      const lineOrColoredShape = metrics.lightness < 190 || metrics.saturation > 0.14;
+      if (!lineOrColoredShape) continue;
+      anchors += 1;
+      if (ox <= -2) buckets.left += 1;
+      if (ox >= 2) buckets.right += 1;
+      if (oy <= -2) buckets.up += 1;
+      if (oy >= 2) buckets.down += 1;
+    }
+  }
+  if (buckets.left >= 2) directions += 1;
+  if (buckets.right >= 2) directions += 1;
+  if (buckets.up >= 2) directions += 1;
+  if (buckets.down >= 2) directions += 1;
+  const enclosedHorizontally = buckets.left >= 2 && buckets.right >= 2;
+  const enclosedVertically = buckets.up >= 2 && buckets.down >= 2;
+  return anchors >= 8 && directions >= 3 && enclosedHorizontally && enclosedVertically;
+}
+
 function hasDirectionalAlphaSupport(data, x, y, radius, threshold) {
   const buckets = { left: 0, right: 0, up: 0, down: 0 };
   let total = 0;
@@ -543,10 +575,19 @@ function restoreIllustrationDetailsData(cutout, original, settings) {
     const protectedWarmOrCool = protectWarmCoolDetail(red, green, blue, metrics, settings);
     const x = index % width;
     const y = Math.floor(index / width);
-    const protectedInteriorWhite = nearWhite && shouldProtectInteriorWhite(settings) && isInteriorLightDetail(cutout.data, x, y, 4, 128);
+    const protectedInteriorWhite = nearWhite
+      && shouldProtectInteriorWhite(settings)
+      && (
+        isInteriorLightDetail(cutout.data, x, y, 4, 128)
+        || isOriginalEnclosedLightDetail(original.data, x, y, 7)
+      );
+    const protectedPaleInterior = settings.preserveLightRegions
+      && metrics.lightness >= 224
+      && metrics.lightness < 248
+      && isOriginalEnclosedLightDetail(original.data, x, y, 7);
     if (nearWhite && !protectedInteriorWhite) continue;
 
-    if (alpha > 18 && (darkStroke || coloredFill || protectedLightFill || protectedWarmOrCool || protectedInteriorWhite)) {
+    if (alpha > 18 && (darkStroke || coloredFill || protectedLightFill || protectedWarmOrCool || protectedInteriorWhite || protectedPaleInterior)) {
       cutout.data[offset] = red;
       cutout.data[offset + 1] = green;
       cutout.data[offset + 2] = blue;
@@ -593,6 +634,12 @@ function restoreIllustrationDetailsData(cutout, original, settings) {
       cutout.data[offset + 1] = green;
       cutout.data[offset + 2] = blue;
       cutout.data[offset + 3] = 92;
+      restoredPixels += 1;
+    } else if (protectedPaleInterior && alpha < 132 && hasOpaqueNeighbor(cutout.data, x, y, 5, 72)) {
+      cutout.data[offset] = red;
+      cutout.data[offset + 1] = green;
+      cutout.data[offset + 2] = blue;
+      cutout.data[offset + 3] = Math.max(alpha, protectedInteriorWhite ? 210 : 150);
       restoredPixels += 1;
     } else if (protectedInteriorWhite && alpha < 190) {
       cutout.data[offset] = red;
@@ -660,6 +707,7 @@ const core = [];
 const lightFace = [];
 const missingLightFace = [];
 const warmFlame = [];
+const whiteFlameCore = [];
 const lineArt = [];
 const interiorWhite = [];
 const backgroundResidue = [];
@@ -700,6 +748,10 @@ fillEllipse(original, 44, 52, 6, 14, [254, 238, 42, 255], warmFlame);
 fillEllipse(original, 116, 52, 6, 14, [254, 238, 42, 255], warmFlame);
 fillEllipse(cutout, 44, 52, 6, 14, [254, 238, 42, 16]);
 fillEllipse(cutout, 116, 52, 6, 14, [254, 238, 42, 16]);
+fillEllipse(original, 44, 52, 2, 7, [252, 252, 250, 255], whiteFlameCore);
+fillEllipse(original, 116, 52, 2, 7, [252, 252, 250, 255], whiteFlameCore);
+fillEllipse(cutout, 44, 52, 2, 7, [252, 252, 250, 0]);
+fillEllipse(cutout, 116, 52, 2, 7, [252, 252, 250, 0]);
 
 for (let y = 4; y < 14; y += 1) {
   for (let x = 6; x < 24; x += 1) {
@@ -778,6 +830,7 @@ const metrics = {
   lineAlpha: averageAlpha(restored.image, lineArt),
   lineCoverage: alphaCoverage(restored.image, lineArt, 180),
   warmAlpha: averageAlpha(restored.image, warmFlame),
+  whiteFlameCoreAlpha: averageAlpha(restored.image, whiteFlameCore),
   interiorWhiteAlpha: averageAlpha(restored.image, interiorWhite),
   whiteFringeAlpha: averageAlpha(restored.image, whiteFringe),
   whiteFringeLightness: averageLightness(restored.image, whiteFringe),
@@ -815,6 +868,7 @@ if (metrics.lightAlpha < 175) failures.push(`light region not preserved: ${metri
 if (metrics.missingLightAlpha < 150) failures.push(`missing interior light region not restored: ${metrics.missingLightAlpha.toFixed(1)}`);
 if (metrics.lineCoverage < 0.82) failures.push(`line art coverage too low: ${(metrics.lineCoverage * 100).toFixed(1)}%`);
 if (metrics.warmAlpha < 150) failures.push(`warm detail not restored: ${metrics.warmAlpha.toFixed(1)}`);
+if (metrics.whiteFlameCoreAlpha < 175) failures.push(`enclosed white flame core not restored: ${metrics.whiteFlameCoreAlpha.toFixed(1)}`);
 if (metrics.interiorWhiteAlpha < 180) failures.push(`interior white detail not restored: ${metrics.interiorWhiteAlpha.toFixed(1)}`);
 if (metrics.whiteFringeAlpha > 42 && metrics.whiteFringeLightness > 220) failures.push(`white fringe still visible: alpha ${metrics.whiteFringeAlpha.toFixed(1)}, lightness ${metrics.whiteFringeLightness.toFixed(1)}`);
 if (metrics.jaggedAfter >= metrics.jaggedBefore * 0.7) failures.push(`jagged edge not softened: ${metrics.jaggedBefore.toFixed(3)} -> ${metrics.jaggedAfter.toFixed(3)}`);
