@@ -413,6 +413,23 @@ figcaption,
   margin-top: 12px;
 }
 
+.svg-options {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  background: #fbfcfd;
+}
+
+.svg-options summary {
+  cursor: pointer;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.svg-options label {
+  margin-top: 10px;
+}
+
 .check-row {
   grid-template-columns: 18px minmax(0, 1fr);
   align-items: start;
@@ -1268,11 +1285,15 @@ canvas {
   display: none;
 }
 
-.manual-panel #exportSelectionBtn {
+.manual-panel #exportSelectionBtn,
+.manual-panel #addSelectionBtn,
+.manual-panel #applySelectionBtn {
   display: none;
 }
 
-.app-manual .manual-panel #exportSelectionBtn {
+.app-manual .manual-panel #exportSelectionBtn,
+.app-manual .manual-panel #addSelectionBtn,
+.app-manual .manual-panel #applySelectionBtn {
   display: inline-flex;
 }
 

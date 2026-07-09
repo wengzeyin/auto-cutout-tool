@@ -291,6 +291,44 @@
               <input id="customScale" type="number" min="0.1" max="8" step="0.1" value="1" />
             </label>
             <p class="export-hint" id="exportHint">处理完成后可导出 PNG / WebP / SVG。</p>
+            <details class="svg-options" id="svgOptions" hidden>
+              <summary>SVG 矢量参数</summary>
+              <label>
+                SVG 模式
+                <select id="svgMode">
+                  <option value="auto" selected>自动</option>
+                  <option value="fast">快速 SVG</option>
+                  <option value="precise">精准 SVG</option>
+                </select>
+              </label>
+              <label>
+                <span>颜色数量 <output id="svgColorsOut">自动</output></span>
+                <small>越高越接近原图，路径也更多</small>
+                <input id="svgColors" type="range" min="8" max="96" step="4" value="48" />
+              </label>
+              <label>
+                <span>路径平滑 <output id="svgSmoothOut">自动</output></span>
+                <small>越高越柔和，细节会减少</small>
+                <input id="svgSmooth" type="range" min="0" max="4" step="1" value="2" />
+              </label>
+              <label>
+                <span>细节保留 <output id="svgDetailOut">自动</output></span>
+                <small>提高可保留小装饰和线稿</small>
+                <input id="svgDetail" type="range" min="1" max="5" step="1" value="3" />
+              </label>
+              <label>
+                <span>小碎片过滤 <output id="svgSpeckleOut">自动</output></span>
+                <small>碎点太多时调高</small>
+                <input id="svgSpeckle" type="range" min="0" max="5" step="1" value="2" />
+              </label>
+              <label class="check-row">
+                <input id="svgLineArt" type="checkbox" checked />
+                <span>
+                  线稿保护
+                  <small>保留黑色描边和小线条</small>
+                </span>
+              </label>
+            </details>
             <button id="downloadBatchZipBtn" type="button" class="ghost" disabled>批量处理并下载 ZIP</button>
           </section>
 
@@ -316,6 +354,8 @@
             </div>
             <button id="manualModeBtn" type="button" class="ghost" disabled>开启框选</button>
             <button id="exportSelectionBtn" type="button" class="ghost" disabled>导出当前框选</button>
+            <button id="addSelectionBtn" type="button" class="ghost" disabled>添加为元素框</button>
+            <button id="applySelectionBtn" type="button" class="ghost" disabled>更新选中元素</button>
           </section>
         </aside>
       </section>

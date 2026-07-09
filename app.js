@@ -35,6 +35,17 @@ const els = {
   edgeOffsetOut: document.querySelector("#edgeOffsetOut"),
   formatSelect: document.querySelector("#formatSelect"),
   exportHint: document.querySelector("#exportHint"),
+  svgOptions: document.querySelector("#svgOptions"),
+  svgMode: document.querySelector("#svgMode"),
+  svgColors: document.querySelector("#svgColors"),
+  svgSmooth: document.querySelector("#svgSmooth"),
+  svgDetail: document.querySelector("#svgDetail"),
+  svgSpeckle: document.querySelector("#svgSpeckle"),
+  svgLineArt: document.querySelector("#svgLineArt"),
+  svgColorsOut: document.querySelector("#svgColorsOut"),
+  svgSmoothOut: document.querySelector("#svgSmoothOut"),
+  svgDetailOut: document.querySelector("#svgDetailOut"),
+  svgSpeckleOut: document.querySelector("#svgSpeckleOut"),
   exportScale: document.querySelector("#exportScale"),
   customScale: document.querySelector("#customScale"),
   customScaleOut: document.querySelector("#customScaleOut"),
@@ -53,6 +64,8 @@ const els = {
   downloadBatchZipBtn: document.querySelector("#downloadBatchZipBtn"),
   manualModeBtn: document.querySelector("#manualModeBtn"),
   exportSelectionBtn: document.querySelector("#exportSelectionBtn"),
+  addSelectionBtn: document.querySelector("#addSelectionBtn"),
+  applySelectionBtn: document.querySelector("#applySelectionBtn"),
   status: document.querySelector("#status"),
   statusTitle: document.querySelector("#statusTitle"),
   statusCard: document.querySelector("#statusCard"),
@@ -89,12 +102,15 @@ const state = {
   refineWorker: null,
   refineJobId: 0,
   alphaNormalized: false,
+  imageType: "unknown",
+  matteWarnings: [],
   components: [],
   queue: [],
   currentItem: null,
   nextItemId: 1,
   batchRunning: false,
   lastBatchReport: null,
+  lastTinyFragmentDebug: null,
   objectUrls: [],
   selectedComponentIds: new Set(),
   processing: false,
@@ -205,12 +221,15 @@ function bindEvents() {
   els.downloadBatchZipBtn.addEventListener("click", downloadBatchZip);
   els.manualModeBtn.addEventListener("click", toggleManualMode);
   els.exportSelectionBtn.addEventListener("click", exportSelection);
+  els.addSelectionBtn.addEventListener("click", addSelectionAsComponent);
+  els.applySelectionBtn.addEventListener("click", applySelectionToSelectedComponent);
   els.selectAllBtn.addEventListener("click", selectAllComponents);
   els.clearSelectionBtn.addEventListener("click", clearComponentSelection);
   els.splitSelectedBtn.addEventListener("click", splitSelectedComponent);
   els.mergeSelectedBtn.addEventListener("click", mergeSelectedComponents);
   els.mobilePrimaryBtn.addEventListener("click", handleMobilePrimary);
   els.formatSelect.addEventListener("change", () => {
+    syncOutputs();
     updateDownloadLabels();
     syncFormatSegments();
     renderCards();
@@ -226,6 +245,16 @@ function bindEvents() {
     renderCards();
     updateManualPreview();
   });
+  for (const input of [els.svgMode, els.svgColors, els.svgSmooth, els.svgDetail, els.svgSpeckle, els.svgLineArt]) {
+    input.addEventListener("input", () => {
+      syncOutputs();
+      if (getExportSettings().ext === "svg") renderCards();
+    });
+    input.addEventListener("change", () => {
+      syncOutputs();
+      if (getExportSettings().ext === "svg") renderCards();
+    });
+  }
   for (const segment of els.formatSegments) {
     segment.addEventListener("click", () => {
       els.formatSelect.value = segment.dataset.format;
@@ -339,6 +368,7 @@ async function addFiles(files, source, options = {}) {
 
   const items = imageFiles.map((file) => {
     const previewUrl = URL.createObjectURL(file);
+    const qaMeta = options.qaMetaByName?.get?.(file.name) || null;
     state.objectUrls.push(previewUrl);
     return {
       id: state.nextItemId++,
@@ -347,6 +377,10 @@ async function addFiles(files, source, options = {}) {
       originalName: file.name || `${source}图片`,
       previewUrl,
       isQa: Boolean(options.isQa),
+      qaId: qaMeta?.id || "",
+      qaScenario: qaMeta?.scenario || "",
+      qaPriority: qaMeta?.priority || "",
+      qaNeedsRealPhoto: Boolean(qaMeta?.needsRealPhoto),
       status: "ready",
       message: "待处理",
       cutoutBlob: null,
@@ -390,6 +424,11 @@ function syncOutputs() {
   els.edgeOffsetOut.value = els.edgeOffset.value;
   els.customScaleOut.textContent = String(getExportScale());
   els.customScaleRow.hidden = els.exportScale.value !== "custom";
+  els.svgColorsOut.value = els.svgMode.value === "auto" ? "自动" : els.svgColors.value;
+  els.svgSmoothOut.value = els.svgMode.value === "auto" ? "自动" : els.svgSmooth.value;
+  els.svgDetailOut.value = els.svgMode.value === "auto" ? "自动" : els.svgDetail.value;
+  els.svgSpeckleOut.value = els.svgMode.value === "auto" ? "自动" : els.svgSpeckle.value;
+  els.svgOptions.hidden = getExportSettings().ext !== "svg";
 }
 
 function applyDynamicDefaults(width, height) {
@@ -442,13 +481,283 @@ function getExportScale() {
 }
 
 function getRefineSettings() {
-  return {
+  const imageType = state.currentItem?.imageType || state.imageType || "unknown";
+  const preset = getAlgorithmPreset(imageType);
+  const base = {
     edgeSmooth: Number(els.edgeSmooth.value),
     feather: Number(els.feather.value),
     cleanup: Number(els.cleanup.value),
     alphaBoost: els.alphaBoost.value,
     edgeOffset: Number(els.edgeOffset.value),
+    fidelity: els.alphaBoost.value === "soft" ? "preserve" : els.alphaBoost.value === "clean" ? "clean" : "balanced",
+    preset,
   };
+  return buildMatteProfile(base, imageType);
+}
+
+function getAlgorithmPreset(imageType = "unknown") {
+  const mode = els.detectMode?.value || "subject";
+  const type = normalizeImageType(imageType);
+  if (mode === "split" && (type === "sticker" || type === "illustration" || type === "line-art")) return "multiSticker";
+  if (type === "transparentMaterial") return "transparentMaterial";
+  if (type === "product") return "product";
+  if (type === "photo") return "portraitHair";
+  if (type === "line-art") return "logoIcon";
+  if (type === "sticker") return "sticker";
+  if (type === "illustration") return "illustration";
+  return "balanced";
+}
+
+function getPresetConfig(preset = "balanced") {
+  const presets = {
+    product: {
+      matte: { cleanupBoost: 1.15, smoothLimit: 3, preserveLight: false, preserveLine: false },
+      detection: { minAreaFactor: 1.05, splitStrength: "conservative", largeBoxRiskRatio: 0.42 },
+      svg: { colorStep: 72, maxEdge: 420, minRegionRatio: 0.00022, simplify: 3.35, smoothPasses: 1, mergeTinyRatio: 0.00046, alphaThreshold: 72 },
+    },
+    portraitHair: {
+      matte: { cleanupBoost: 0.9, smoothLimit: 2, preserveLight: true, preserveLine: false },
+      detection: { minAreaFactor: 0.9, splitStrength: "standard", largeBoxRiskRatio: 0.5 },
+      svg: { colorStep: 96, maxEdge: 280, minRegionRatio: 0.00062, simplify: 4.2, smoothPasses: 1, mergeTinyRatio: 0.0011, alphaThreshold: 96 },
+    },
+    illustration: {
+      matte: { cleanupBoost: 0.72, smoothLimit: 2, preserveLight: true, preserveLine: true },
+      detection: { minAreaFactor: 0.72, splitStrength: "standard", largeBoxRiskRatio: 0.34 },
+      svg: { mode: "precise", colorStep: 36, maxEdge: 820, minRegionRatio: 0.000035, simplify: 1.65, smoothPasses: 2, mergeTinyRatio: 0.00008, alphaThreshold: 28, protectLineArt: true },
+    },
+    sticker: {
+      matte: { cleanupBoost: 0.68, smoothLimit: 2, preserveLight: true, preserveLine: true },
+      detection: { minAreaFactor: 0.62, splitStrength: "standard", largeBoxRiskRatio: 0.32 },
+      svg: { mode: "precise", colorStep: 36, maxEdge: 820, minRegionRatio: 0.000035, simplify: 1.65, smoothPasses: 2, mergeTinyRatio: 0.00008, alphaThreshold: 28, protectLineArt: true },
+    },
+    multiSticker: {
+      matte: { cleanupBoost: 0.66, smoothLimit: 2, preserveLight: true, preserveLine: true },
+      detection: { minAreaFactor: 0.5, splitStrength: "strong", largeBoxRiskRatio: 0.28 },
+      svg: { mode: "precise", colorStep: 60, maxEdge: 560, minRegionRatio: 0.00014, simplify: 2.85, smoothPasses: 2, mergeTinyRatio: 0.00032, alphaThreshold: 38, protectLineArt: true },
+    },
+    logoIcon: {
+      matte: { cleanupBoost: 0.62, smoothLimit: 1, preserveLight: true, preserveLine: true },
+      detection: { minAreaFactor: 0.75, splitStrength: "standard", largeBoxRiskRatio: 0.38 },
+      svg: { mode: "precise", colorStep: 28, maxEdge: 900, minRegionRatio: 0.000028, simplify: 1.25, smoothPasses: 2, mergeTinyRatio: 0.00006, alphaThreshold: 24, protectLineArt: true },
+    },
+    transparentMaterial: {
+      matte: { cleanupBoost: 0.55, smoothLimit: 3, preserveLight: true, preserveLine: false },
+      detection: { minAreaFactor: 0.85, splitStrength: "conservative", largeBoxRiskRatio: 0.45 },
+      svg: { colorStep: 80, maxEdge: 360, minRegionRatio: 0.00042, simplify: 3.6, smoothPasses: 1, mergeTinyRatio: 0.00075, alphaThreshold: 64 },
+    },
+    balanced: {
+      matte: { cleanupBoost: 1, smoothLimit: 3, preserveLight: true, preserveLine: false },
+      detection: { minAreaFactor: 1, splitStrength: "standard", largeBoxRiskRatio: 0.36 },
+      svg: { colorStep: 50, maxEdge: 640, minRegionRatio: 0.00006, simplify: 2.35, smoothPasses: 1, mergeTinyRatio: 0.00013, alphaThreshold: 48 },
+    },
+  };
+  return presets[preset] || presets.balanced;
+}
+
+function buildMatteProfile(base, imageType = "unknown") {
+  const type = normalizeImageType(imageType);
+  const presetConfig = getPresetConfig(base.preset);
+  const profile = {
+    ...base,
+    imageType: type,
+    cleanup: Number(base.cleanup) || 24,
+    edgeSmooth: Number(base.edgeSmooth) || 0,
+    feather: Number(base.feather) || 0,
+    edgeOffset: Number(base.edgeOffset) || 0,
+    fidelity: base.fidelity || "balanced",
+    residueThreshold: Math.max(6, Number(base.cleanup) || 24),
+    edgeLow: Math.max(10, Math.round((Number(base.cleanup) || 24) * 0.72)),
+    coreThreshold: base.alphaBoost === "clean" ? 176 : base.alphaBoost === "soft" ? 226 : 204,
+    solidThreshold: base.alphaBoost === "clean" ? 178 : base.alphaBoost === "soft" ? 232 : 208,
+    midBoost: base.alphaBoost === "clean" ? 1.16 : base.alphaBoost === "soft" ? 0.96 : 1.06,
+    preserveLightRegions: false,
+    preserveLineArt: false,
+    preserveColoredDetails: false,
+    despeckleStrength: 1,
+    alphaNormalizedThreshold: 120,
+    coreNormalizeThreshold: 0,
+    coreNeighborThreshold: 0,
+  };
+
+  profile.cleanup = Math.max(0, Math.round(profile.cleanup * presetConfig.matte.cleanupBoost));
+  profile.edgeSmooth = Math.min(profile.edgeSmooth, presetConfig.matte.smoothLimit);
+  profile.preserveLightRegions = presetConfig.matte.preserveLight;
+  profile.preserveLineArt = presetConfig.matte.preserveLine;
+  profile.preserveColoredDetails = presetConfig.matte.preserveLight;
+
+  if (type === "illustration" || type === "line-art" || type === "sticker") {
+    profile.preserveLineArt = true;
+    profile.preserveLightRegions = true;
+    profile.preserveColoredDetails = true;
+    profile.cleanup = Math.min(profile.cleanup, profile.fidelity === "clean" ? 30 : 22);
+    profile.residueThreshold = Math.max(10, Math.round(profile.cleanup * 0.78));
+    profile.edgeLow = Math.max(8, Math.round(profile.cleanup * 0.55));
+    profile.coreThreshold = profile.fidelity === "clean" ? 190 : profile.fidelity === "preserve" ? 238 : 220;
+    profile.solidThreshold = profile.coreThreshold;
+    profile.midBoost = profile.fidelity === "clean" ? 1.04 : profile.fidelity === "preserve" ? 0.9 : 0.98;
+    profile.edgeSmooth = Math.min(profile.edgeSmooth, type === "line-art" ? 1 : 2);
+    profile.feather = Math.min(profile.feather, 1);
+    profile.despeckleStrength = 0.45;
+  } else if (type === "transparentMaterial") {
+    profile.cleanup = Math.max(8, Math.round(profile.cleanup * 0.62));
+    profile.residueThreshold = Math.max(6, Math.round(profile.cleanup * 0.58));
+    profile.edgeLow = Math.max(5, Math.round(profile.cleanup * 0.45));
+    profile.coreThreshold = profile.fidelity === "clean" ? 208 : profile.fidelity === "preserve" ? 248 : 232;
+    profile.solidThreshold = profile.coreThreshold;
+    profile.midBoost = profile.fidelity === "clean" ? 0.98 : 0.86;
+    profile.preserveLightRegions = true;
+    profile.despeckleStrength = 0.35;
+    profile.alphaNormalizedThreshold = 168;
+    profile.coreNormalizeThreshold = profile.fidelity === "clean" ? 150 : 176;
+    profile.coreNeighborThreshold = 210;
+  } else if (type === "product") {
+    profile.cleanup = Math.max(profile.cleanup, profile.fidelity === "preserve" ? 20 : 28);
+    profile.residueThreshold = profile.cleanup;
+    profile.coreThreshold = profile.fidelity === "clean" ? 166 : 198;
+    profile.midBoost = profile.fidelity === "clean" ? 1.2 : 1.08;
+    profile.despeckleStrength = 1.15;
+    profile.alphaNormalizedThreshold = profile.fidelity === "preserve" ? 108 : 96;
+    profile.coreNormalizeThreshold = profile.fidelity === "preserve" ? 122 : 108;
+    profile.coreNeighborThreshold = 142;
+  } else if (type === "photo") {
+    profile.cleanup = Math.max(profile.cleanup, profile.fidelity === "preserve" ? 18 : 24);
+    profile.coreThreshold = profile.fidelity === "clean" ? 184 : profile.fidelity === "preserve" ? 226 : 208;
+    profile.midBoost = profile.fidelity === "clean" ? 1.1 : profile.fidelity === "preserve" ? 0.94 : 1.02;
+    profile.alphaNormalizedThreshold = profile.fidelity === "preserve" ? 96 : 86;
+    profile.coreNormalizeThreshold = profile.fidelity === "preserve" ? 104 : 86;
+    profile.coreNeighborThreshold = profile.fidelity === "preserve" ? 132 : 118;
+    profile.postCoreNormalizeThreshold = profile.fidelity === "preserve" ? 116 : 88;
+    profile.postCoreNeighborThreshold = profile.fidelity === "preserve" ? 176 : 144;
+    profile.postCoreNeighborCount = profile.fidelity === "preserve" ? 5 : 4;
+    profile.postCoreNormalizePasses = 3;
+  }
+
+  if (profile.fidelity === "preserve") {
+    profile.cleanup = Math.max(8, Math.round(profile.cleanup * 0.72));
+    profile.residueThreshold = Math.max(6, Math.round(profile.residueThreshold * 0.72));
+    profile.coreThreshold = Math.min(242, profile.coreThreshold + 12);
+    profile.solidThreshold = profile.coreThreshold;
+    profile.midBoost = Math.min(profile.midBoost, 0.96);
+  } else if (profile.fidelity === "clean") {
+    profile.cleanup = Math.min(96, Math.round(profile.cleanup * 1.18));
+    profile.residueThreshold = Math.min(104, Math.round(profile.residueThreshold * 1.15));
+    profile.coreThreshold = Math.max(160, profile.coreThreshold - 8);
+    profile.solidThreshold = profile.coreThreshold;
+  }
+
+  return profile;
+}
+
+function normalizeImageType(type) {
+  return new Set(["photo", "illustration", "line-art", "sticker", "product", "transparentMaterial"]).has(type) ? type : "unknown";
+}
+
+function inferQaImageTypeFromScenario(scenario = "") {
+  if (/透明材质/.test(scenario)) return "transparentMaterial";
+  if (/商品/.test(scenario)) return "product";
+  if (/发丝|卷发|宠物|复杂背景人物/.test(scenario)) return "photo";
+  if (/logo|文字/.test(scenario)) return "line-art";
+  if (/贴纸合集|靠近多角色|小物体细节/.test(scenario)) return "sticker";
+  if (/插画|图标/.test(scenario)) return "illustration";
+  return "";
+}
+
+function analyzeSourceImageType(sourceCanvas) {
+  if (!sourceCanvas?.width || !sourceCanvas?.height) return "unknown";
+  const maxEdge = 420;
+  const scale = Math.min(1, maxEdge / Math.max(sourceCanvas.width, sourceCanvas.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(sourceCanvas.width * scale));
+  canvas.height = Math.max(1, Math.round(sourceCanvas.height * scale));
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(sourceCanvas, 0, 0, canvas.width, canvas.height);
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const { data, width, height } = imageData;
+  const colors = new Set();
+  let samples = 0;
+  let nearWhite = 0;
+  let nearBlack = 0;
+  let foreground = 0;
+  let darkForeground = 0;
+  let saturatedForeground = 0;
+  let lightColoredForeground = 0;
+  let saturated = 0;
+  let lowSaturation = 0;
+  let edgeHits = 0;
+  let totalGradient = 0;
+  const step = Math.max(1, Math.round(Math.sqrt((width * height) / 36000)));
+
+  for (let y = 1; y < height - 1; y += step) {
+    for (let x = 1; x < width - 1; x += step) {
+      const offset = (y * width + x) * 4;
+      const red = data[offset];
+      const green = data[offset + 1];
+      const blue = data[offset + 2];
+      const metrics = colorMetrics(red, green, blue);
+      samples += 1;
+      colors.add(`${red >> 4},${green >> 4},${blue >> 4}`);
+      const isNearWhite = metrics.lightness > 238 && metrics.saturation < 0.18;
+      const isForeground = !isNearWhite;
+      if (isNearWhite) nearWhite += 1;
+      if (metrics.lightness < 46) nearBlack += 1;
+      if (isForeground) {
+        foreground += 1;
+        if (metrics.lightness < 96) darkForeground += 1;
+        if (metrics.saturation > 0.32) saturatedForeground += 1;
+        if (metrics.lightness > 168 && metrics.lightness < 246 && metrics.saturation > 0.045) lightColoredForeground += 1;
+      }
+      if (metrics.saturation > 0.38) saturated += 1;
+      if (metrics.saturation < 0.12) lowSaturation += 1;
+      const right = (y * width + x + 1) * 4;
+      const down = ((y + 1) * width + x) * 4;
+      const gradient =
+        Math.abs(red - data[right]) + Math.abs(green - data[right + 1]) + Math.abs(blue - data[right + 2]) +
+        Math.abs(red - data[down]) + Math.abs(green - data[down + 1]) + Math.abs(blue - data[down + 2]);
+      totalGradient += gradient;
+      if (gradient > 130) edgeHits += 1;
+    }
+  }
+
+  if (!samples) return "unknown";
+  const uniqueRatio = colors.size / samples;
+  const whiteRatio = nearWhite / samples;
+  const blackRatio = nearBlack / samples;
+  const foregroundRatio = foreground / samples;
+  const darkForegroundRatio = darkForeground / Math.max(1, foreground);
+  const saturatedForegroundRatio = saturatedForeground / Math.max(1, foreground);
+  const lightColoredForegroundRatio = lightColoredForeground / Math.max(1, foreground);
+  const saturatedRatio = saturated / samples;
+  const lowSatRatio = lowSaturation / samples;
+  const edgeRatio = edgeHits / samples;
+  const averageGradient = totalGradient / samples;
+
+  if (averageGradient > 38 && edgeRatio > 0.05 && foregroundRatio > 0.72) return "photo";
+  if (
+    edgeRatio > 0.012 &&
+    foregroundRatio > 0.015 &&
+    foregroundRatio < 0.42 &&
+    darkForegroundRatio > 0.34 &&
+    saturatedForegroundRatio < 0.38 &&
+    uniqueRatio < 0.34
+  ) return "line-art";
+  if (
+    whiteRatio > 0.38 &&
+    foregroundRatio > 0.035 &&
+    foregroundRatio < 0.5 &&
+    uniqueRatio < 0.3 &&
+    (saturatedForegroundRatio > 0.35 || (saturatedForegroundRatio > 0.18 && lightColoredForegroundRatio > 0.18))
+  ) return "sticker";
+  if (
+    whiteRatio > 0.38 &&
+    foregroundRatio > 0.035 &&
+    foregroundRatio < 0.55 &&
+    lowSatRatio > 0.62 &&
+    saturatedForegroundRatio < 0.22
+  ) return "product";
+  if (uniqueRatio < 0.24 && (saturatedRatio > 0.16 || edgeRatio > 0.08)) return "illustration";
+  if (averageGradient > 32 && edgeRatio > 0.04) return "photo";
+  if (uniqueRatio < 0.3) return "illustration";
+  return "photo";
 }
 
 function updateDownloadLabels() {
@@ -481,6 +790,8 @@ async function loadItem(item) {
     item.originalHeight = bitmap.height;
     drawBitmapToCanvas(bitmap, state.sourceOriginalCanvas, state.sourceOriginalCanvas.getContext("2d"), Infinity);
     drawBitmapToCanvas(bitmap, els.sourceCanvas, sourceCtx);
+    item.imageType = inferQaImageTypeFromScenario(item.qaScenario) || analyzeSourceImageType(state.sourceOriginalCanvas);
+    state.imageType = item.imageType;
     applyDynamicDefaults(els.sourceCanvas.width, els.sourceCanvas.height);
     sizeOverlay();
 
@@ -574,17 +885,19 @@ async function loadQaSamples() {
     if (!manifestResponse.ok) throw new Error("测试图清单读取失败");
     const manifest = await manifestResponse.json();
     const files = [];
+    const qaMetaByName = new Map();
 
     for (const asset of manifest.assets || []) {
       const response = await fetch(`./${manifest.assetsDir}/${asset.fileName}`, { cache: "no-store" });
       if (!response.ok) throw new Error(`缺少测试图：${asset.fileName}`);
       const blob = await response.blob();
       files.push(new File([blob], asset.fileName, { type: blob.type || "image/png" }));
+      qaMetaByName.set(asset.fileName, asset);
     }
 
     if (!files.length) throw new Error("测试图清单为空");
     clearQueue();
-    await addFiles(files, "测试图", { autoSelect: true, isQa: true });
+    await addFiles(files, "测试图", { autoSelect: true, isQa: true, qaMetaByName });
     setUploadFeedback(`已载入 ${files.length} 张 QA 测试图，可逐张开始抠图验收。`, "ok");
   } catch (error) {
     console.error(error);
@@ -631,6 +944,8 @@ function resetResult() {
   els.downloadZipBtn.disabled = true;
   els.manualModeBtn.disabled = true;
   els.exportSelectionBtn.disabled = true;
+  els.addSelectionBtn.disabled = true;
+  els.applySelectionBtn.disabled = true;
   updateBatchButton();
   renderCards();
   updateManualPreview();
@@ -801,6 +1116,8 @@ async function processImage(options = {}) {
       item.originalCutoutBlob = state.originalCutoutBlob;
       item.cutoutBlob = state.cutoutBlob;
       item.components = [...state.components];
+      item.processMode = els.detectMode.value;
+      item.qaMetrics = computeCurrentQaMetrics();
       item.message = `${state.components.length} 个元素`;
       renderQueue();
     }
@@ -846,6 +1163,8 @@ async function scanAndRender() {
     const minArea = Number(els.minArea.value);
     const padding = Number(els.padding.value);
     const mode = els.detectMode.value;
+    const preset = getAlgorithmPreset(state.currentItem?.imageType || state.imageType || "unknown");
+    const presetConfig = getPresetConfig(preset);
     if (mode === "complete") {
       state.components = [];
       state.selectedComponentIds.clear();
@@ -866,7 +1185,7 @@ async function scanAndRender() {
     }
 
     const detection = createDetectionImageData(els.resultCanvas, 1024);
-    const minAreaLow = Math.max(8, Math.round(minArea * detection.scale * detection.scale));
+    const minAreaLow = Math.max(8, Math.round(minArea * presetConfig.detection.minAreaFactor * detection.scale * detection.scale));
     const paddingLow = Math.max(1, Math.round(padding * detection.scale));
     const useIllustrationMode = mode === "illustration";
     const useMultiObjectMode = mode === "split";
@@ -881,7 +1200,9 @@ async function scanAndRender() {
         )
       : useMultiObjectMode
         ? findMultiObjectComponents(detection.imageData, alphaThreshold, minAreaLow, paddingLow, {
-            strength: els.splitStrength.value,
+            strength: presetConfig.detection.splitStrength === "strong" && els.splitStrength.value === "standard"
+              ? "strong"
+              : els.splitStrength.value,
           })
         : findSmartComponents(detection.imageData, alphaThreshold, minAreaLow, paddingLow);
     const mergedLow = useMultiObjectMode
@@ -943,11 +1264,39 @@ async function redrawCutoutCanvas() {
 
 async function refineAndPreviewCutout({ immediateScan = true } = {}) {
   if (!state.cutoutOriginalCanvas.width) return;
-  const refineResult = await refineCutoutAlphaAsync(state.cutoutOriginalCanvas, getRefineSettings());
-  const detailResult = restoreIllustrationDetails(refineResult.canvas, state.sourceOriginalCanvas, getRefineSettings());
+  const baseSettings = getRefineSettings();
+  let refineResult = await refineCutoutAlphaAsync(state.cutoutOriginalCanvas, baseSettings);
+  let detailResult = restoreIllustrationDetails(refineResult.canvas, state.sourceOriginalCanvas, baseSettings);
+  let quality = analyzeMatteQuality(detailResult.canvas, state.sourceOriginalCanvas, baseSettings);
+  const primaryResult = { refineResult, detailResult, quality };
+
+  if (shouldRetryWithPreserveMatte(quality, baseSettings)) {
+    const fallbackSettings = buildMatteProfile({ ...baseSettings, fidelity: "preserve", alphaBoost: "soft" }, baseSettings.imageType);
+    const fallbackRefine = await refineCutoutAlphaAsync(state.cutoutOriginalCanvas, fallbackSettings);
+    const fallbackDetails = restoreIllustrationDetails(fallbackRefine.canvas, state.sourceOriginalCanvas, fallbackSettings);
+    const fallbackQuality = analyzeMatteQuality(fallbackDetails.canvas, state.sourceOriginalCanvas, fallbackSettings);
+    if (shouldUseFallbackMatte(primaryResult.quality, fallbackQuality, baseSettings)) {
+      refineResult = fallbackRefine;
+      detailResult = fallbackDetails;
+      quality = fallbackQuality;
+      state.matteWarnings = ["已自动回退到保真优先参数，保护线稿和浅色区域。", ...quality.warnings];
+    } else {
+      refineResult = primaryResult.refineResult;
+      detailResult = primaryResult.detailResult;
+      quality = primaryResult.quality;
+      state.matteWarnings = ["已检测到保真回退没有带来更好结果，保留当前边缘参数。", ...quality.warnings];
+    }
+  } else {
+    state.matteWarnings = quality.warnings;
+  }
+
   state.refinedCutoutCanvas = detailResult.canvas;
   state.alphaNormalized = refineResult.alphaNormalized;
   state.cutoutBlob = await canvasToBlob(state.refinedCutoutCanvas);
+  if (state.currentItem) {
+    state.currentItem.imageType = baseSettings.imageType;
+    state.currentItem.matteQuality = quality;
+  }
   if (state.currentItem) {
     state.currentItem.cutoutBlob = state.cutoutBlob;
     state.currentItem.filteredCutoutBlob = state.cutoutBlob;
@@ -959,6 +1308,7 @@ async function refineAndPreviewCutout({ immediateScan = true } = {}) {
   updateManualPreview();
   if (state.alphaNormalized) setStatus("已自动增强主体透明度。", "透明度已修复");
   if (detailResult.restoredPixels > 120) setStatus("已保护插画描边和细节。", "线稿已修复");
+  if (state.matteWarnings.length) setStatus(state.matteWarnings.slice(0, 2).join(" "), "质量保护");
   if (immediateScan) scheduleScan(250);
 }
 
@@ -1017,30 +1367,223 @@ function refineCutoutAlpha(sourceCanvas, settings) {
   const alphaNormalized = alphaStats.midRatio > 0.28 && alphaStats.average > 80 && alphaStats.average < 225;
   imageData = applyAlphaOffset(imageData, settings.edgeOffset);
   imageData = smoothAlpha(imageData, settings.edgeSmooth + settings.feather);
-  despeckleAlpha(imageData, settings.cleanup);
-  defringe(imageData);
+  despeckleAlpha(imageData, settings.cleanup, settings.despeckleStrength);
+  defringe(imageData, settings);
   const { data } = imageData;
-  const cleanup = settings.cleanup;
-  const solidThreshold = settings.alphaBoost === "clean" ? 168 : settings.alphaBoost === "soft" ? 230 : 205;
+  const alphaSource = new Uint8ClampedArray(data.length / 4);
+  for (let index = 0; index < alphaSource.length; index += 1) alphaSource[index] = data[index * 4 + 3];
+  const residueThreshold = settings.residueThreshold ?? settings.cleanup;
+  const edgeLow = settings.edgeLow ?? Math.max(10, Math.round(settings.cleanup * 0.7));
+  const coreThreshold = settings.coreThreshold ?? (settings.alphaBoost === "clean" ? 168 : settings.alphaBoost === "soft" ? 230 : 205);
+  const solidThreshold = settings.solidThreshold ?? coreThreshold;
+  const midBoost = settings.midBoost ?? (settings.alphaBoost === "clean" ? 1.18 : settings.alphaBoost === "soft" ? 0.92 : 1.05);
   for (let index = 0; index < data.length; index += 4) {
     const alpha = data[index + 3];
-    if (alpha < cleanup) {
+    if (alpha < residueThreshold) {
       data[index + 3] = 0;
       continue;
     }
-    if (alpha > solidThreshold || (alphaNormalized && alpha > 120)) {
+    if (
+      alpha > solidThreshold
+      || (alphaNormalized && alpha > (settings.alphaNormalizedThreshold ?? 120))
+      || shouldNormalizeCoreAlpha(alphaSource, imageData.width, imageData.height, index / 4, alpha, settings)
+    ) {
       data[index + 3] = 255;
       continue;
     }
-    const low = cleanup;
-    const high = solidThreshold;
+    const low = edgeLow;
+    const high = coreThreshold;
     const t = clamp((alpha - low) / Math.max(1, high - low), 0, 1);
     const curve = t * t * (3 - 2 * t);
-    const boost = settings.alphaBoost === "clean" ? 1.18 : settings.alphaBoost === "soft" ? 0.92 : 1.05;
-    data[index + 3] = Math.round(clamp(curve * 255 * boost, 0, 255));
+    const edgeFloor = settings.preserveLineArt ? Math.min(alpha, 42) : 0;
+    data[index + 3] = Math.round(clamp(Math.max(edgeFloor, curve * 255 * midBoost), 0, 255));
   }
+  normalizeSemiOpaqueCore(imageData, settings);
+  guidedSmoothEdgeAlpha(imageData, settings);
+  suppressWhiteFringeAlpha(imageData, settings);
+  antiAliasHardEdges(imageData, settings);
+  suppressWhiteFringeAlpha(imageData, settings);
   ctx.putImageData(imageData, 0, 0);
   return { canvas, alphaNormalized };
+}
+
+function guidedSmoothEdgeAlpha(imageData, settings = {}) {
+  if (settings.imageType !== "product") return imageData;
+  const { width, height, data } = imageData;
+  const source = new Uint8ClampedArray(data);
+  const lowThreshold = Math.max(8, Math.round((settings.edgeLow || settings.cleanup || 18) * 0.85));
+  const highThreshold = settings.fidelity === "preserve" ? 246 : 238;
+  const colorSigma = settings.imageType === "product" ? 72 : 54;
+  const strength = settings.imageType === "product"
+    ? 0.34
+    : settings.fidelity === "clean" ? 0.3 : 0.22;
+
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const offset = (y * width + x) * 4;
+      const alpha = source[offset + 3];
+      if (alpha <= lowThreshold || alpha >= highThreshold) continue;
+      const pixelMetrics = colorMetrics(source[offset], source[offset + 1], source[offset + 2]);
+      if (pixelMetrics.lightness > 238 && pixelMetrics.saturation < 0.14) continue;
+
+      let hasTransparent = false;
+      let hasSolid = false;
+      let weightedAlpha = 0;
+      let weightSum = 0;
+      const red = source[offset];
+      const green = source[offset + 1];
+      const blue = source[offset + 2];
+
+      for (let oy = -1; oy <= 1; oy += 1) {
+        for (let ox = -1; ox <= 1; ox += 1) {
+          const next = ((y + oy) * width + x + ox) * 4;
+          const nextAlpha = source[next + 3];
+          if (nextAlpha <= lowThreshold) hasTransparent = true;
+          if (nextAlpha >= highThreshold) hasSolid = true;
+          const colorDistance =
+            Math.abs(red - source[next]) +
+            Math.abs(green - source[next + 1]) +
+            Math.abs(blue - source[next + 2]);
+          const colorWeight = Math.exp(-colorDistance / colorSigma);
+          const spatialWeight = ox === 0 && oy === 0 ? 2.5 : 1;
+          const weight = colorWeight * spatialWeight;
+          weightedAlpha += nextAlpha * weight;
+          weightSum += weight;
+        }
+      }
+      if (!hasTransparent || !hasSolid || !weightSum) continue;
+      const target = weightedAlpha / weightSum;
+      data[offset + 3] = Math.round(clamp(alpha * (1 - strength) + target * strength, 0, 255));
+    }
+  }
+  return imageData;
+}
+
+function suppressWhiteFringeAlpha(imageData, settings = {}) {
+  if (settings.imageType !== "product") return imageData;
+  const { width, height, data } = imageData;
+  const source = new Uint8ClampedArray(data);
+  const preserveMultiplier = settings.fidelity === "preserve" ? 0.78 : 1;
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const offset = (y * width + x) * 4;
+      const alpha = source[offset + 3];
+      if (alpha <= 0 || alpha >= 150) continue;
+      const pixelMetrics = colorMetrics(source[offset], source[offset + 1], source[offset + 2]);
+      if (pixelMetrics.lightness <= 238 || pixelMetrics.saturation >= 0.14) continue;
+      let coloredCount = 0;
+      let transparentCount = 0;
+      for (let oy = -1; oy <= 1; oy += 1) {
+        for (let ox = -1; ox <= 1; ox += 1) {
+          const next = ((y + oy) * width + x + ox) * 4;
+          const nextAlpha = source[next + 3];
+          if (nextAlpha <= 16) transparentCount += 1;
+          if (nextAlpha <= 180) continue;
+          const metrics = colorMetrics(source[next], source[next + 1], source[next + 2]);
+          if (metrics.lightness < 228 || metrics.saturation > 0.18) coloredCount += 1;
+        }
+      }
+      const fringeStrength = whiteFringeAlphaStrength(settings, alpha, transparentCount, coloredCount);
+      if (fringeStrength > 0) {
+        data[offset + 3] = Math.round(alpha * fringeStrength * preserveMultiplier);
+      }
+    }
+  }
+  return imageData;
+}
+
+function antiAliasHardEdges(imageData, settings = {}) {
+  if (settings.imageType === "transparentMaterial") return imageData;
+  const { width, height, data } = imageData;
+  const source = new Uint8ClampedArray(data);
+  const lowThreshold = Math.max(8, Math.round((settings.edgeLow || settings.cleanup || 18) * 0.85));
+  const strongThreshold = 232;
+  const factor = settings.imageType === "product"
+    ? (settings.fidelity === "clean" ? 0.62 : settings.fidelity === "preserve" ? 0.38 : 0.56)
+    : settings.fidelity === "clean" ? 0.52 : settings.fidelity === "preserve" ? 0.32 : 0.42;
+
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const offset = (y * width + x) * 4;
+      const alpha = source[offset + 3];
+      let transparent = 0;
+      let strong = 0;
+      let alphaSum = 0;
+      let weightSum = 0;
+      for (let oy = -1; oy <= 1; oy += 1) {
+        for (let ox = -1; ox <= 1; ox += 1) {
+          const weight = ox === 0 && oy === 0 ? 2 : 1;
+          const neighborAlpha = source[((y + oy) * width + x + ox) * 4 + 3];
+          if (neighborAlpha <= lowThreshold) transparent += 1;
+          if (neighborAlpha >= strongThreshold) strong += 1;
+          alphaSum += neighborAlpha * weight;
+          weightSum += weight;
+        }
+      }
+      if (!transparent || !strong) continue;
+      const mixed = alphaSum / Math.max(1, weightSum);
+      if (settings.imageType === "product" && alpha >= 248 && transparent >= 1 && strong <= 8) {
+        data[offset + 3] = Math.round(clamp(alpha * (1 - factor) + mixed * factor, 128, 242));
+      } else if (settings.imageType === "product" && alpha <= lowThreshold && strong >= 1 && transparent <= 7) {
+        data[offset + 3] = Math.round(clamp(mixed * factor * 0.62, 0, 112));
+      } else if (alpha >= 248 && transparent >= 2 && strong <= 6) {
+        data[offset + 3] = Math.round(clamp(alpha * (1 - factor) + mixed * factor, 96, 246));
+      } else if (alpha <= lowThreshold && strong >= 2 && transparent <= 6) {
+        data[offset + 3] = Math.round(clamp(mixed * factor * 0.55, 0, 96));
+      }
+    }
+  }
+  return imageData;
+}
+
+function normalizeSemiOpaqueCore(imageData, settings) {
+  const threshold = Number(settings.postCoreNormalizeThreshold || 0);
+  if (!threshold) return;
+  const { width, height, data } = imageData;
+  const neighborThreshold = Number(settings.postCoreNeighborThreshold || 180);
+  const neighborCount = Number(settings.postCoreNeighborCount || 5);
+  const passes = Math.max(1, Math.min(3, Number(settings.postCoreNormalizePasses || 1)));
+  for (let pass = 0; pass < passes; pass += 1) {
+    const alphaSource = new Uint8ClampedArray(data.length / 4);
+    for (let index = 0; index < alphaSource.length; index += 1) alphaSource[index] = data[index * 4 + 3];
+    let changed = 0;
+    for (let index = 0; index < alphaSource.length; index += 1) {
+      const alpha = alphaSource[index];
+      if (alpha < threshold || alpha >= 245) continue;
+      const x = index % width;
+      const y = Math.floor(index / width);
+      if (hasStrongAlphaNeighbor(alphaSource, width, height, x, y, 2, neighborThreshold, neighborCount)) {
+        data[index * 4 + 3] = 255;
+        changed += 1;
+      }
+    }
+    if (!changed) break;
+  }
+}
+
+function shouldNormalizeCoreAlpha(alphaSource, width, height, pixelIndex, alpha, settings) {
+  const threshold = Number(settings.coreNormalizeThreshold || 0);
+  if (!threshold || alpha < threshold) return false;
+  const x = pixelIndex % width;
+  const y = Math.floor(pixelIndex / width);
+  return hasStrongAlphaNeighbor(alphaSource, width, height, x, y, 2, Number(settings.coreNeighborThreshold || 176), 3);
+}
+
+function hasStrongAlphaNeighbor(alphaSource, width, height, x, y, radius, threshold, minCount) {
+  let count = 0;
+  for (let oy = -radius; oy <= radius; oy += 1) {
+    const py = y + oy;
+    if (py < 0 || py >= height) continue;
+    for (let ox = -radius; ox <= radius; ox += 1) {
+      const px = x + ox;
+      if (px < 0 || px >= width) continue;
+      if (alphaSource[py * width + px] >= threshold) {
+        count += 1;
+        if (count >= minCount) return true;
+      }
+    }
+  }
+  return false;
 }
 
 function restoreIllustrationDetails(cutoutCanvas, originalCanvas, settings) {
@@ -1059,12 +1602,13 @@ function restoreIllustrationDetails(cutoutCanvas, originalCanvas, settings) {
   originalCtx.drawImage(originalCanvas, 0, 0, width, height);
   const original = originalCtx.getImageData(0, 0, width, height);
 
-  const supportThreshold = Math.max(12, Math.round((settings.cleanup || 24) * 0.65));
+  const supportThreshold = Math.max(8, Math.round((settings.cleanup || 24) * (settings.preserveLineArt ? 0.45 : 0.65)));
   const foreground = new Uint8Array(width * height);
   for (let index = 0; index < foreground.length; index += 1) {
     foreground[index] = result.data[index * 4 + 3] > supportThreshold ? 1 : 0;
   }
-  const nearForeground = dilateMask(foreground, width, height, Math.max(2, Math.min(5, Number(settings.edgeSmooth || 2) + 2)));
+  const restoreRadius = Math.max(2, Math.min(settings.preserveLineArt ? 8 : 5, Number(settings.edgeSmooth || 2) + 3));
+  const nearForeground = dilateMask(foreground, width, height, restoreRadius);
 
   let restoredPixels = 0;
   for (let index = 0; index < foreground.length; index += 1) {
@@ -1075,13 +1619,20 @@ function restoreIllustrationDetails(cutoutCanvas, originalCanvas, settings) {
     const green = original.data[offset + 1];
     const blue = original.data[offset + 2];
     const metrics = colorMetrics(red, green, blue);
-    const nearWhite = metrics.lightness > 242 && metrics.saturation < 0.16;
-    if (nearWhite) continue;
+    const nearWhite = metrics.lightness > 246 && metrics.saturation < 0.12;
+    const x = index % width;
+    const y = Math.floor(index / width);
+    const protectedInteriorWhite = nearWhite
+      && shouldProtectInteriorWhite(settings)
+      && isInteriorLightDetail(result.data, width, height, x, y, 4, 128);
+    if (nearWhite && !protectedInteriorWhite) continue;
 
-    const darkStroke = metrics.lightness < 110 && metrics.saturation < 0.72;
-    const coloredFill = metrics.saturation > 0.28 && metrics.lightness < 238;
+    const darkStroke = protectLineArt(metrics, settings);
+    const coloredFill = metrics.saturation > 0.24 && metrics.lightness < 242;
+    const protectedLightFill = protectLightRegion(red, green, blue, metrics, settings);
+    const protectedWarmOrCool = protectWarmCoolDetail(red, green, blue, metrics, settings);
 
-    if (alpha > 40 && (darkStroke || coloredFill)) {
+    if (alpha > 18 && (darkStroke || coloredFill || protectedLightFill || protectedWarmOrCool || protectedInteriorWhite)) {
       result.data[offset] = red;
       result.data[offset + 1] = green;
       result.data[offset + 2] = blue;
@@ -1093,17 +1644,126 @@ function restoreIllustrationDetails(cutoutCanvas, originalCanvas, settings) {
       result.data[offset + 2] = blue;
       result.data[offset + 3] = Math.max(alpha, alpha < settings.cleanup ? 235 : 255);
       restoredPixels += 1;
-    } else if (coloredFill && alpha > 0 && alpha < 160) {
+    } else if (settings.preserveLineArt && alpha === 0 && darkStroke) {
+      result.data[offset] = red;
+      result.data[offset + 1] = green;
+      result.data[offset + 2] = blue;
+      result.data[offset + 3] = 210;
+      restoredPixels += 1;
+    } else if ((coloredFill || protectedWarmOrCool) && alpha > 0 && alpha < 170) {
       result.data[offset] = red;
       result.data[offset + 1] = green;
       result.data[offset + 2] = blue;
       result.data[offset + 3] = Math.max(alpha, 180);
+      restoredPixels += 1;
+    } else if (settings.preserveColoredDetails && alpha === 0 && (protectedWarmOrCool || (coloredFill && hasOpaqueNeighbor(result.data, width, height, index % width, Math.floor(index / width), 3, 96)))) {
+      result.data[offset] = red;
+      result.data[offset + 1] = green;
+      result.data[offset + 2] = blue;
+      result.data[offset + 3] = protectedWarmOrCool ? 150 : 128;
+      restoredPixels += 1;
+    } else if (protectedLightFill && alpha > 0 && alpha < 138) {
+      result.data[offset] = red;
+      result.data[offset + 1] = green;
+      result.data[offset + 2] = blue;
+      result.data[offset + 3] = Math.max(alpha, hasDirectionalAlphaSupport(result.data, width, height, x, y, 4, 96) ? 170 : 118);
+      restoredPixels += 1;
+    } else if (settings.preserveLightRegions && protectedLightFill && alpha === 0 && hasDirectionalAlphaSupport(result.data, width, height, x, y, 5, 88)) {
+      result.data[offset] = red;
+      result.data[offset + 1] = green;
+      result.data[offset + 2] = blue;
+      result.data[offset + 3] = 168;
+      restoredPixels += 1;
+    } else if (settings.preserveLightRegions && protectedLightFill && alpha === 0 && hasOpaqueNeighbor(result.data, width, height, x, y, 4, 96)) {
+      result.data[offset] = red;
+      result.data[offset + 1] = green;
+      result.data[offset + 2] = blue;
+      result.data[offset + 3] = 92;
+      restoredPixels += 1;
+    } else if (protectedInteriorWhite && alpha < 190) {
+      result.data[offset] = red;
+      result.data[offset + 1] = green;
+      result.data[offset + 2] = blue;
+      result.data[offset + 3] = Math.max(alpha, 210);
       restoredPixels += 1;
     }
   }
 
   resultCtx.putImageData(result, 0, 0);
   return { canvas: cutoutCanvas, restoredPixels };
+}
+
+function protectLineArt(metrics, settings) {
+  return Boolean(settings.preserveLineArt && metrics.lightness < 132 && metrics.saturation < 0.82)
+    || metrics.lightness < 88;
+}
+
+function protectLightRegion(red, green, blue, metrics, settings) {
+  if (!settings.preserveLightRegions) return false;
+  const notWhiteBackground = !(metrics.lightness > 246 && metrics.saturation < 0.12);
+  const hasColorBias = Math.max(red, green, blue) - Math.min(red, green, blue) > 10;
+  return notWhiteBackground && hasColorBias && metrics.lightness >= 168 && metrics.lightness < 246 && metrics.saturation > 0.045;
+}
+
+function protectWarmCoolDetail(red, green, blue, metrics, settings) {
+  if (!settings.preserveLightRegions) return false;
+  return (
+    (red > green + 8 && green > blue + 4 && metrics.lightness > 130) ||
+    (blue > red + 8 && green > red + 4 && metrics.lightness > 142)
+  );
+}
+
+function shouldProtectInteriorWhite(settings = {}) {
+  return Boolean(settings.preserveLightRegions) && (
+    settings.imageType === "line-art" ||
+    settings.imageType === "sticker" ||
+    settings.preset === "multiSticker" ||
+    settings.preset === "logoIcon"
+  );
+}
+
+function isInteriorLightDetail(data, width, height, x, y, radius, threshold) {
+  const buckets = { left: 0, right: 0, up: 0, down: 0 };
+  let total = 0;
+  for (let oy = -radius; oy <= radius; oy += 1) {
+    const py = y + oy;
+    if (py < 0 || py >= height) continue;
+    for (let ox = -radius; ox <= radius; ox += 1) {
+      const px = x + ox;
+      if (px < 0 || px >= width || (px === x && py === y)) continue;
+      const alpha = data[(py * width + px) * 4 + 3];
+      if (alpha < threshold) continue;
+      total += 1;
+      if (ox < 0) buckets.left += 1;
+      if (ox > 0) buckets.right += 1;
+      if (oy < 0) buckets.up += 1;
+      if (oy > 0) buckets.down += 1;
+    }
+  }
+  return total >= 16 && buckets.left >= 3 && buckets.right >= 3 && buckets.up >= 3 && buckets.down >= 3;
+}
+
+function hasDirectionalAlphaSupport(data, width, height, x, y, radius, threshold) {
+  const buckets = { left: 0, right: 0, up: 0, down: 0 };
+  let total = 0;
+  for (let oy = -radius; oy <= radius; oy += 1) {
+    const py = y + oy;
+    if (py < 0 || py >= height) continue;
+    for (let ox = -radius; ox <= radius; ox += 1) {
+      const px = x + ox;
+      if (px < 0 || px >= width || (px === x && py === y)) continue;
+      const alpha = data[(py * width + px) * 4 + 3];
+      if (alpha < threshold) continue;
+      total += 1;
+      if (ox < 0) buckets.left += 1;
+      if (ox > 0) buckets.right += 1;
+      if (oy < 0) buckets.up += 1;
+      if (oy > 0) buckets.down += 1;
+    }
+  }
+  const horizontal = buckets.left >= 3 && buckets.right >= 3;
+  const vertical = buckets.up >= 3 && buckets.down >= 3;
+  return total >= 16 && (horizontal || vertical) && (buckets.left + buckets.right >= 7) && (buckets.up + buckets.down >= 7);
 }
 
 function colorMetrics(red, green, blue) {
@@ -1114,6 +1774,241 @@ function colorMetrics(red, green, blue) {
     lightness,
     saturation: max ? (max - min) / max : 0,
   };
+}
+
+function analyzeMatteQuality(cutoutCanvas, originalCanvas, settings) {
+  if (!cutoutCanvas?.width) {
+    return { warnings: [], alphaCoverage: 0, edgeJaggednessScore: 0, semiTransparentCoreRatio: 0, lightRegionLossRatio: 0, lineArtLossRatio: 0, whiteFringeRatio: 0 };
+  }
+  const width = cutoutCanvas.width;
+  const height = cutoutCanvas.height;
+  const cutoutData = cutoutCanvas.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, width, height);
+  const originalData = getCanvasImageDataAtSize(originalCanvas, width, height);
+  const metrics = computeMatteMetrics(cutoutData, originalData, settings);
+  const warnings = [];
+  if (metrics.semiTransparentCoreRatio > 0.24) warnings.push("主体核心存在过多半透明，已尝试增强。");
+  if (metrics.lineArtLossRatio > 0.16) warnings.push("检测到线稿可能断裂。");
+  if (metrics.lightRegionLossRatio > 0.2) warnings.push("检测到浅色区域可能缺失。");
+  if (metrics.whiteFringeRatio > 0.08) warnings.push("边缘仍有白边残留。");
+  if (metrics.edgeJaggednessScore > 0.42) warnings.push("边缘锯齿风险偏高。");
+  return { ...metrics, warnings };
+}
+
+function shouldRetryWithPreserveMatte(quality, settings) {
+  if (!quality || settings.fidelity === "preserve") return false;
+  const illustrationLike = settings.imageType === "illustration" || settings.imageType === "line-art" || settings.imageType === "sticker";
+  if (illustrationLike && quality.lineArtLossRatio > 0.12) return true;
+  if (illustrationLike && quality.lightRegionLossRatio > 0.18) return true;
+  if (quality.semiTransparentCoreRatio > 0.36) return true;
+  return false;
+}
+
+function shouldUseFallbackMatte(primaryQuality, fallbackQuality, settings = {}) {
+  if (!primaryQuality || !fallbackQuality) return Boolean(fallbackQuality);
+  const primaryPenalty = matteQualityPenalty(primaryQuality, settings);
+  const fallbackPenalty = matteQualityPenalty(fallbackQuality, settings);
+  const improvesCritical = (
+    fallbackQuality.lineArtLossRatio < primaryQuality.lineArtLossRatio * 0.82 ||
+    fallbackQuality.lightRegionLossRatio < primaryQuality.lightRegionLossRatio * 0.82 ||
+    fallbackQuality.semiTransparentCoreRatio < primaryQuality.semiTransparentCoreRatio * 0.82
+  );
+  const worsensCleanup = (
+    fallbackQuality.whiteFringeRatio > primaryQuality.whiteFringeRatio + 0.035 ||
+    fallbackQuality.edgeJaggednessScore > primaryQuality.edgeJaggednessScore + 0.08
+  );
+  if (worsensCleanup && fallbackPenalty >= primaryPenalty * 0.92) return false;
+  return fallbackPenalty < primaryPenalty * 0.98 || improvesCritical;
+}
+
+function matteQualityPenalty(quality, settings = {}) {
+  const illustrationLike = settings.imageType === "illustration" || settings.imageType === "line-art" || settings.imageType === "sticker";
+  const lineWeight = illustrationLike ? 3.2 : 1.2;
+  const lightWeight = illustrationLike ? 2.8 : 1.1;
+  return (
+    (quality.lineArtLossRatio || 0) * lineWeight +
+    (quality.lightRegionLossRatio || 0) * lightWeight +
+    (quality.semiTransparentCoreRatio || 0) * 2.2 +
+    (quality.whiteFringeRatio || 0) * 1.8 +
+    (quality.edgeJaggednessScore || 0) * 0.85
+  );
+}
+
+function getCanvasImageDataAtSize(canvas, width, height) {
+  if (!canvas?.width) return null;
+  const scaled = document.createElement("canvas");
+  scaled.width = width;
+  scaled.height = height;
+  const ctx = scaled.getContext("2d", { willReadFrequently: true });
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(canvas, 0, 0, width, height);
+  return ctx.getImageData(0, 0, width, height);
+}
+
+function computeMatteMetrics(cutoutData, originalData, settings = {}) {
+  const { width, height, data } = cutoutData;
+  const original = originalData?.data;
+  let alphaArea = 0;
+  let coreArea = 0;
+  let semiCore = 0;
+  let edgeAlpha = 0;
+  let edgeTransitions = 0;
+  let jaggedTransitions = 0;
+  let possibleLight = 0;
+  let lostLight = 0;
+  let possibleLine = 0;
+  let lostLine = 0;
+  let fringe = 0;
+  let lowAlphaFringe = 0;
+  let fringeAlphaSum = 0;
+  const supportThreshold = Math.max(12, settings.edgeLow || 16);
+
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const index = y * width + x;
+      const offset = index * 4;
+      const alpha = data[offset + 3];
+      if (alpha > supportThreshold) alphaArea += 1;
+      const stableCore = alpha > 150 && hasStrongAlphaNeighborFromData(data, width, height, x, y, 2, 176, 5);
+      if (stableCore) {
+        coreArea += 1;
+        if (alpha < 232) semiCore += 1;
+      }
+      if (alpha > 0 && alpha < 245) edgeAlpha += 1;
+
+      const rightAlpha = data[offset + 7];
+      const downAlpha = data[((y + 1) * width + x) * 4 + 3];
+      const transition = Math.abs(alpha - rightAlpha) + Math.abs(alpha - downAlpha);
+      if (transition > 80) {
+        edgeTransitions += 1;
+        const diagA = data[((y - 1) * width + x - 1) * 4 + 3];
+        const diagB = data[((y + 1) * width + x + 1) * 4 + 3];
+        if (Math.abs(diagA - diagB) > 120 && transition > 220) jaggedTransitions += 1;
+      }
+
+      if (!original) continue;
+      const red = original[offset];
+      const green = original[offset + 1];
+      const blue = original[offset + 2];
+      const metrics = colorMetrics(red, green, blue);
+      const nearForeground = alpha > 0 || hasOpaqueNeighbor(data, width, height, x, y, 2, supportThreshold);
+      if (!nearForeground) continue;
+
+      const lineCandidate = metrics.lightness < 118 && metrics.saturation < 0.82;
+      const lightCandidate = metrics.lightness > 168 && metrics.lightness < 246 && metrics.saturation > 0.055;
+      if (lineCandidate) {
+        possibleLine += 1;
+        if (alpha < 80) lostLine += 1;
+      }
+      if (lightCandidate) {
+        possibleLight += 1;
+        if (alpha < 54) lostLight += 1;
+      }
+      const resultMetrics = colorMetrics(data[offset], data[offset + 1], data[offset + 2]);
+      const whiteEdgePixel = resultMetrics.lightness > 238 && resultMetrics.saturation < 0.14;
+      if (
+        alpha > 0
+        && alpha < (settings.preserveLineArt ? 24 : 128)
+        && whiteEdgePixel
+        && hasTransparentNeighbor(data, width, height, x, y, 2, supportThreshold)
+        && hasColoredOpaqueNeighbor(data, width, height, x, y, 3, 128)
+        && !hasLightOpaqueNeighbor(data, width, height, x, y, 2, 176)
+      ) {
+        fringe += 1;
+        fringeAlphaSum += alpha;
+        if (alpha < 24) lowAlphaFringe += 1;
+      }
+    }
+  }
+
+  return {
+    alphaCoverage: alphaArea / Math.max(1, width * height),
+    edgeJaggednessScore: jaggedTransitions / Math.max(1, edgeTransitions),
+    semiTransparentCoreRatio: semiCore / Math.max(1, coreArea),
+    lightRegionLossRatio: lostLight / Math.max(1, possibleLight),
+    lineArtLossRatio: lostLine / Math.max(1, possibleLine),
+    whiteFringeRatio: fringe / Math.max(1, edgeAlpha),
+    whiteFringePixels: fringe,
+    whiteFringeEdgePixels: edgeAlpha,
+    whiteFringeAreaRatio: fringe / Math.max(1, width * height),
+    lowAlphaWhiteFringeRatio: lowAlphaFringe / Math.max(1, fringe),
+    whiteFringeAverageAlpha: fringeAlphaSum / Math.max(1, fringe),
+  };
+}
+
+function hasOpaqueNeighbor(data, width, height, x, y, radius, threshold) {
+  for (let oy = -radius; oy <= radius; oy += 1) {
+    const py = y + oy;
+    if (py < 0 || py >= height) continue;
+    for (let ox = -radius; ox <= radius; ox += 1) {
+      const px = x + ox;
+      if (px < 0 || px >= width) continue;
+      if (data[(py * width + px) * 4 + 3] > threshold) return true;
+    }
+  }
+  return false;
+}
+
+function hasColoredOpaqueNeighbor(data, width, height, x, y, radius, threshold) {
+  for (let oy = -radius; oy <= radius; oy += 1) {
+    const py = y + oy;
+    if (py < 0 || py >= height) continue;
+    for (let ox = -radius; ox <= radius; ox += 1) {
+      const px = x + ox;
+      if (px < 0 || px >= width || (px === x && py === y)) continue;
+      const offset = (py * width + px) * 4;
+      if (data[offset + 3] <= threshold) continue;
+      const metrics = colorMetrics(data[offset], data[offset + 1], data[offset + 2]);
+      if (metrics.lightness < 226 || metrics.saturation > 0.18) return true;
+    }
+  }
+  return false;
+}
+
+function hasLightOpaqueNeighbor(data, width, height, x, y, radius, threshold) {
+  for (let oy = -radius; oy <= radius; oy += 1) {
+    const py = y + oy;
+    if (py < 0 || py >= height) continue;
+    for (let ox = -radius; ox <= radius; ox += 1) {
+      const px = x + ox;
+      if (px < 0 || px >= width || (px === x && py === y)) continue;
+      const offset = (py * width + px) * 4;
+      if (data[offset + 3] <= threshold) continue;
+      const metrics = colorMetrics(data[offset], data[offset + 1], data[offset + 2]);
+      if (metrics.lightness > 228 && metrics.saturation < 0.16) return true;
+    }
+  }
+  return false;
+}
+
+function hasStrongAlphaNeighborFromData(data, width, height, x, y, radius, threshold, minCount) {
+  let count = 0;
+  for (let oy = -radius; oy <= radius; oy += 1) {
+    const py = y + oy;
+    if (py < 0 || py >= height) continue;
+    for (let ox = -radius; ox <= radius; ox += 1) {
+      const px = x + ox;
+      if (px < 0 || px >= width) continue;
+      if (data[(py * width + px) * 4 + 3] >= threshold) {
+        count += 1;
+        if (count >= minCount) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function hasTransparentNeighbor(data, width, height, x, y, radius, threshold) {
+  for (let oy = -radius; oy <= radius; oy += 1) {
+    const py = y + oy;
+    if (py < 0 || py >= height) continue;
+    for (let ox = -radius; ox <= radius; ox += 1) {
+      const px = x + ox;
+      if (px < 0 || px >= width || (px === x && py === y)) continue;
+      if (data[(py * width + px) * 4 + 3] <= threshold) return true;
+    }
+  }
+  return false;
 }
 
 function analyzeAlpha(imageData) {
@@ -1190,44 +2085,55 @@ function erodeMask(mask, width, height, radius) {
   return output;
 }
 
-function despeckleAlpha(imageData, threshold) {
+function despeckleAlpha(imageData, threshold, strength = 1) {
   const { width, height, data } = imageData;
   const source = new Uint8ClampedArray(data);
+  const neighborLimit = strength < 0.7 ? 0 : 1;
+  const activeThreshold = threshold + Math.round(18 * strength);
   for (let y = 1; y < height - 1; y += 1) {
     for (let x = 1; x < width - 1; x += 1) {
       const offset = (y * width + x) * 4 + 3;
-      if (source[offset] === 0 || source[offset] > threshold + 18) continue;
+      if (source[offset] === 0 || source[offset] > activeThreshold) continue;
       let neighbors = 0;
       for (let oy = -1; oy <= 1; oy += 1) {
         for (let ox = -1; ox <= 1; ox += 1) {
           if (ox || oy) neighbors += source[((y + oy) * width + x + ox) * 4 + 3] > threshold ? 1 : 0;
         }
       }
-      if (neighbors <= 1) data[offset] = 0;
+      if (neighbors <= neighborLimit) data[offset] = 0;
     }
   }
 }
 
-function defringe(imageData) {
+function defringe(imageData, settings = {}) {
   const { width, height, data } = imageData;
   const source = new Uint8ClampedArray(data);
+  const protectTransparent = settings.imageType === "transparentMaterial";
+  const preserveMultiplier = settings.fidelity === "preserve" ? 0.78 : 1;
   for (let y = 1; y < height - 1; y += 1) {
     for (let x = 1; x < width - 1; x += 1) {
       const offset = (y * width + x) * 4;
       const alpha = source[offset + 3];
       if (alpha === 0 || alpha > 235) continue;
+      const pixelMetrics = colorMetrics(source[offset], source[offset + 1], source[offset + 2]);
       let r = 0;
       let g = 0;
       let b = 0;
       let count = 0;
+      let coloredCount = 0;
+      let transparentCount = 0;
       for (let oy = -1; oy <= 1; oy += 1) {
         for (let ox = -1; ox <= 1; ox += 1) {
           const next = ((y + oy) * width + x + ox) * 4;
-          if (source[next + 3] <= 220) continue;
+          const nextAlpha = source[next + 3];
+          if (nextAlpha <= 16) transparentCount += 1;
+          if (nextAlpha <= 220) continue;
+          const metrics = colorMetrics(source[next], source[next + 1], source[next + 2]);
           r += source[next];
           g += source[next + 1];
           b += source[next + 2];
           count += 1;
+          if (metrics.lightness < 228 || metrics.saturation > 0.18) coloredCount += 1;
         }
       }
       if (count) {
@@ -1235,8 +2141,23 @@ function defringe(imageData) {
         data[offset + 1] = Math.round(g / count);
         data[offset + 2] = Math.round(b / count);
       }
+      const whiteFringe = pixelMetrics.lightness > 238 && pixelMetrics.saturation < 0.14;
+      const fringeStrength = whiteFringeAlphaStrength(settings, alpha, transparentCount, coloredCount);
+      if (whiteFringe && !protectTransparent && fringeStrength > 0) {
+        data[offset + 3] = Math.round(alpha * fringeStrength * preserveMultiplier);
+      }
     }
   }
+}
+
+function whiteFringeAlphaStrength(settings = {}, alpha = 255, transparentCount = 0, coloredCount = 0) {
+  if (transparentCount < 1 || coloredCount < 1) return 0;
+  if (settings.imageType === "product" && alpha < 150) return 0.18;
+  const illustrationLike = settings.imageType === "illustration" || settings.imageType === "sticker" || settings.imageType === "line-art";
+  if (illustrationLike && alpha < 150 && transparentCount >= 2) {
+    return settings.fidelity === "preserve" ? 0.46 : 0.34;
+  }
+  return 0;
 }
 
 function createDetectionImageData(sourceCanvas, maxEdge = 1024) {
@@ -1266,36 +2187,36 @@ function findSmartComponents(imageData, alphaThreshold, minArea, pad) {
 function getSplitSettings(strength = "standard") {
   const presets = {
     conservative: {
-      coreBase: 64,
+      coreBase: 68,
       supportBase: 22,
       minCoreFactor: 0.18,
-      absorbScale: 0.014,
-      mergeDistance: 8,
-      gapDensityRatio: 0.08,
-      valleyDensityRatio: 0.42,
-      gapMinRatio: 0.018,
+      absorbScale: 0.01,
+      mergeDistance: 6,
+      gapDensityRatio: 0.055,
+      valleyDensityRatio: 0.34,
+      gapMinRatio: 0.022,
       splitPaddingFactor: 1,
     },
     standard: {
       coreBase: 72,
       supportBase: 22,
       minCoreFactor: 0.12,
-      absorbScale: 0.01,
-      mergeDistance: 6,
-      gapDensityRatio: 0.12,
-      valleyDensityRatio: 0.5,
-      gapMinRatio: 0.014,
+      absorbScale: 0.007,
+      mergeDistance: 4,
+      gapDensityRatio: 0.075,
+      valleyDensityRatio: 0.4,
+      gapMinRatio: 0.018,
       splitPaddingFactor: 0.8,
     },
     strong: {
       coreBase: 80,
       supportBase: 24,
       minCoreFactor: 0.08,
-      absorbScale: 0.007,
-      mergeDistance: 4,
-      gapDensityRatio: 0.18,
-      valleyDensityRatio: 0.62,
-      gapMinRatio: 0.01,
+      absorbScale: 0.0045,
+      mergeDistance: 2,
+      gapDensityRatio: 0.1,
+      valleyDensityRatio: 0.48,
+      gapMinRatio: 0.012,
       splitPaddingFactor: 0.55,
     },
   };
@@ -1324,6 +2245,9 @@ function findMultiObjectComponents(imageData, alphaThreshold, minArea, pad, opti
   components = splitLargeComponents(components, imageData, coreMask, width, height, minCoreArea, pad, settings);
   components = absorbTinyMultiObjectFragments(components, imageArea, minArea, settings);
   components = mergeAssetFragments(components, imageData, Math.max(24, alphaThreshold), settings);
+  components = splitLargeComponents(components, imageData, coreMask, width, height, minCoreArea, pad, settings);
+  components = stabilizeOverSplitComponents(components, imageData, coreMask, supportThreshold, minCoreArea, minArea, pad, settings);
+  components = stabilizeTinyFragmentBurst(components, imageData, minArea, settings);
 
   return sortComponentsReadingOrder(components)
     .map((component, index) => ({ ...component, id: index + 1, mask: undefined }));
@@ -1455,7 +2379,28 @@ function keepMultiObjectComponent(component, imageArea, minArea) {
   const meaningfulArea = component.area >= Math.max(minArea * 0.55, imageArea * 0.00025);
   const residualLine = (aspect > 10 || aspect < 0.1) && component.alphaDensity < 0.24;
   const weakResidual = component.strongAlphaArea < Math.max(4, minArea * 0.12) && component.alphaDensity < 0.18;
-  return (meaningfulArea || denseSmall) && !residualLine && !weakResidual;
+  const smallScore = scoreSmallComponent(component, imageArea, minArea);
+  return (meaningfulArea || denseSmall || smallScore >= 0.72) && !residualLine && !weakResidual;
+}
+
+function scoreSmallComponent(component, imageArea, minArea) {
+  const boxArea = Math.max(1, component.width * component.height);
+  const alphaArea = component.alphaArea ?? component.area ?? 0;
+  const strongAlphaArea = component.strongAlphaArea ?? alphaArea;
+  const density = component.alphaDensity ?? alphaArea / boxArea;
+  const aspect = component.width / Math.max(1, component.height);
+  const minDimension = Math.min(component.width, component.height);
+  const maxDimension = Math.max(component.width, component.height);
+  const relativeArea = alphaArea / Math.max(1, imageArea);
+  const sizeFloor = Math.max(10, Math.sqrt(imageArea) * 0.008);
+  if (minDimension < 3 || maxDimension < sizeFloor) return 0;
+  if (aspect > 7 || aspect < 1 / 7) return density > 0.62 ? 0.32 : 0;
+  const sizeScore = clamp(alphaArea / Math.max(8, minArea * 0.32), 0, 1);
+  const densityScore = clamp((density - 0.16) / 0.42, 0, 1);
+  const strengthScore = clamp(strongAlphaArea / Math.max(5, alphaArea * 0.42), 0, 1);
+  const shapeScore = aspect > 3.5 || aspect < 1 / 3.5 ? 0.72 : 1;
+  const relativeBoost = relativeArea > 0.00012 ? 1 : 0.82;
+  return (sizeScore * 0.34 + densityScore * 0.28 + strengthScore * 0.26 + shapeScore * 0.12) * relativeBoost;
 }
 
 function splitLargeComponents(components, imageData, coreMask, width, height, minCoreArea, pad, settings) {
@@ -1463,12 +2408,20 @@ function splitLargeComponents(components, imageData, coreMask, width, height, mi
   const output = [];
 
   for (const component of components) {
-    const children = splitLargeComponent(component, imageData, coreMask, width, height, minCoreArea, pad, settings);
-    if (children.length >= 2) output.push(...children);
-    else output.push(component);
+    output.push(...splitComponentRecursively(component, imageData, coreMask, width, height, minCoreArea, pad, settings, imageArea, 0));
   }
 
   return output;
+}
+
+function splitComponentRecursively(component, imageData, coreMask, width, height, minCoreArea, pad, settings, imageArea, depth) {
+  if (depth >= 3) return [component];
+  const children = splitLargeComponent(component, imageData, coreMask, width, height, minCoreArea, pad, settings);
+  if (children.length < 2) return [component];
+  return children.flatMap((child) => {
+    if (!keepMultiObjectComponent(child, imageArea, minCoreArea)) return [];
+    return splitComponentRecursively(child, imageData, coreMask, width, height, minCoreArea, pad, settings, imageArea, depth + 1);
+  });
 }
 
 function splitLargeComponent(component, imageData, coreMask, width, height, minCoreArea, pad, settings = getSplitSettings()) {
@@ -1480,10 +2433,13 @@ function splitLargeComponent(component, imageData, coreMask, width, height, minC
   const hasMultipleCore = coreChildren.length >= 2;
   if (!largeBySize && !sparseLarge && !hasMultipleCore) return [];
 
+  const ownershipChildren = splitBySeedOwnership(component, imageData, coreChildren, minCoreArea, pad, settings);
+  if (ownershipChildren.length >= 2) return ownershipChildren;
+
   const projectionChildren = projectionSplit(component, imageData, coreMask, minCoreArea, pad, settings);
   if (projectionChildren.length >= 2) return projectionChildren;
 
-  if (!hasMultipleCore) return [];
+  if (!hasMultipleCore || (!sparseLarge && component.alphaDensity > 0.28)) return [];
 
   return coreChildren
     .filter((child) => child.area >= minCoreArea)
@@ -1506,6 +2462,141 @@ function splitLargeComponent(component, imageData, coreMask, width, height, minC
     .filter((child) => keepMultiObjectComponent(child, imageArea, minCoreArea));
 }
 
+function splitBySeedOwnership(component, imageData, coreChildren, minCoreArea, pad, settings) {
+  if (!coreChildren || coreChildren.length < 2 || settings.mergeDistance > 4) return [];
+  const { width, height } = imageData;
+  const imageArea = width * height;
+  const parentMetrics = measureComponent(component, imageData, Math.max(24, settings.supportBase));
+  const sparseOrLarge = parentMetrics.boxRatio > 0.12 || parentMetrics.alphaDensity < 0.34 || component.width / width > 0.26 || component.height / height > 0.26;
+  if (!sparseOrLarge) return [];
+
+  const seeds = coreChildren
+    .filter((seed) => seed.area >= minCoreArea)
+    .map((seed, index) => ({
+      ...seed,
+      id: index,
+      cx: seed.x + seed.width / 2,
+      cy: seed.y + seed.height / 2,
+    }));
+  if (seeds.length < 2) return [];
+
+  const minCenterX = Math.min(...seeds.map((seed) => seed.cx));
+  const maxCenterX = Math.max(...seeds.map((seed) => seed.cx));
+  const minCenterY = Math.min(...seeds.map((seed) => seed.cy));
+  const maxCenterY = Math.max(...seeds.map((seed) => seed.cy));
+  const spanX = (maxCenterX - minCenterX) / Math.max(1, component.width);
+  const spanY = (maxCenterY - minCenterY) / Math.max(1, component.height);
+  const dominantAxis = spanX >= spanY ? "x" : "y";
+  if (Math.max(spanX, spanY) < 0.26) return [];
+
+  const supportMask = createAlphaMask(imageData, Math.max(16, settings.supportBase));
+  const clusters = seeds.map((seed) => ({
+    seed,
+    area: 0,
+    minX: Infinity,
+    minY: Infinity,
+    maxX: -Infinity,
+    maxY: -Infinity,
+  }));
+  const startX = Math.max(0, Math.floor(component.x));
+  const startY = Math.max(0, Math.floor(component.y));
+  const endX = Math.min(width, Math.ceil(component.x + component.width));
+  const endY = Math.min(height, Math.ceil(component.y + component.height));
+
+  for (let y = startY; y < endY; y += 1) {
+    for (let x = startX; x < endX; x += 1) {
+      const index = y * width + x;
+      if (!supportMask[index]) continue;
+      let best = null;
+      let bestDistance = Infinity;
+      for (const cluster of clusters) {
+        const dx = (x - cluster.seed.cx) / Math.max(1, component.width);
+        const dy = (y - cluster.seed.cy) / Math.max(1, component.height);
+        const distance = dx * dx + dy * dy;
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          best = cluster;
+        }
+      }
+      if (!best) continue;
+      best.area += 1;
+      if (x < best.minX) best.minX = x;
+      if (x > best.maxX) best.maxX = x;
+      if (y < best.minY) best.minY = y;
+      if (y > best.maxY) best.maxY = y;
+    }
+  }
+
+  const splitPad = Math.max(1, Math.round(pad * settings.splitPaddingFactor));
+  const children = clusters
+    .filter((cluster) => cluster.area >= Math.max(6, minCoreArea * 0.7) && Number.isFinite(cluster.minX))
+    .map((cluster, index) => {
+      const padded = padBox(cluster, splitPad, width, height);
+      return measureBoxAsComponent({
+        id: index + 1,
+        x: padded.minX,
+        y: padded.minY,
+        width: padded.maxX - padded.minX + 1,
+        height: padded.maxY - padded.minY + 1,
+      }, imageData, Math.max(24, settings.supportBase));
+    })
+    .filter((child) => keepMultiObjectComponent(child, imageArea, minCoreArea));
+  if (children.length < 2) return [];
+
+  const sorted = [...children].sort((a, b) => dominantAxis === "x" ? a.x - b.x : a.y - b.y);
+  if (!hasProjectionValleyBetweenChildren(sorted, component, imageData, dominantAxis, settings)) return [];
+  const childDensity = sorted.reduce((sum, child) => sum + child.alphaDensity, 0) / sorted.length;
+  const childArea = sorted.reduce((sum, child) => sum + child.area, 0);
+  if (childDensity < parentMetrics.alphaDensity * 0.78) return [];
+  if (childArea < parentMetrics.alphaArea * 0.72) return [];
+  return sorted;
+}
+
+function hasProjectionValleyBetweenChildren(children, component, imageData, axis, settings) {
+  if (children.length < 2) return false;
+  const { width, data } = imageData;
+  const alphaThreshold = Math.max(24, settings.supportBase);
+  const valleys = [];
+  for (let index = 0; index < children.length - 1; index += 1) {
+    const left = children[index];
+    const right = children[index + 1];
+    const cut = axis === "x"
+      ? Math.round((left.x + left.width + right.x) / 2)
+      : Math.round((left.y + left.height + right.y) / 2);
+    const strip = projectionStripDensity(component, data, width, imageData.height, axis, cut, alphaThreshold);
+    valleys.push(strip);
+  }
+  return valleys.some((value) => value <= 0.18) || (
+    valleys.length >= 2 && valleys.reduce((sum, value) => sum + value, 0) / valleys.length <= 0.26
+  );
+}
+
+function projectionStripDensity(component, data, width, height, axis, cut, alphaThreshold) {
+  const radius = 2;
+  const startX = Math.max(0, Math.floor(component.x));
+  const startY = Math.max(0, Math.floor(component.y));
+  const endX = Math.min(width, Math.ceil(component.x + component.width));
+  const endY = Math.min(height, Math.ceil(component.y + component.height));
+  let opaque = 0;
+  let total = 0;
+  if (axis === "x") {
+    for (let x = Math.max(startX, cut - radius); x <= Math.min(endX - 1, cut + radius); x += 1) {
+      for (let y = startY; y < endY; y += 1) {
+        total += 1;
+        if (data[(y * width + x) * 4 + 3] >= alphaThreshold) opaque += 1;
+      }
+    }
+  } else {
+    for (let y = Math.max(startY, cut - radius); y <= Math.min(endY - 1, cut + radius); y += 1) {
+      for (let x = startX; x < endX; x += 1) {
+        total += 1;
+        if (data[(y * width + x) * 4 + 3] >= alphaThreshold) opaque += 1;
+      }
+    }
+  }
+  return total ? opaque / total : 1;
+}
+
 function projectionSplit(component, imageData, coreMask, minCoreArea, pad, settings) {
   const vertical = splitByProjection(component, imageData, coreMask, "x", minCoreArea, pad, settings);
   if (vertical.length >= 2) return vertical;
@@ -1513,7 +2604,13 @@ function projectionSplit(component, imageData, coreMask, minCoreArea, pad, setti
   if (horizontal.length >= 2) return horizontal;
   const verticalPeaks = splitByProjectionPeaks(component, imageData, coreMask, "x", minCoreArea, pad, settings);
   if (verticalPeaks.length >= 2) return verticalPeaks;
-  return splitByProjectionPeaks(component, imageData, coreMask, "y", minCoreArea, pad, settings);
+  const horizontalPeaks = splitByProjectionPeaks(component, imageData, coreMask, "y", minCoreArea, pad, settings);
+  if (horizontalPeaks.length >= 2) return horizontalPeaks;
+  const verticalValleys = splitByProjectionValleys(component, imageData, coreMask, "x", minCoreArea, pad, settings);
+  if (verticalValleys.length >= 2) return verticalValleys;
+  const horizontalValleys = splitByProjectionValleys(component, imageData, coreMask, "y", minCoreArea, pad, settings);
+  if (horizontalValleys.length >= 2) return horizontalValleys;
+  return splitStackedComponent(component, imageData, coreMask, minCoreArea, pad, settings);
 }
 
 function splitByProjection(component, imageData, coreMask, axis, minCoreArea, pad, settings) {
@@ -1671,6 +2768,120 @@ function splitByProjectionPeaks(component, imageData, coreMask, axis, minCoreAre
   return childDensity >= parentDensity * 0.72 ? children : [];
 }
 
+function splitByProjectionValleys(component, imageData, coreMask, axis, minCoreArea, pad, settings) {
+  if ((settings.mergeDistance ?? 4) > 4) return [];
+  const { width, height } = imageData;
+  const startX = Math.max(0, Math.floor(component.x));
+  const startY = Math.max(0, Math.floor(component.y));
+  const endX = Math.min(width, Math.ceil(component.x + component.width));
+  const endY = Math.min(height, Math.ceil(component.y + component.height));
+  const length = axis === "x" ? endX - startX : endY - startY;
+  const crossLength = axis === "x" ? endY - startY : endX - startX;
+  if (length < 72 || crossLength < 24) return [];
+
+  const projection = new Array(length).fill(0);
+  for (let y = startY; y < endY; y += 1) {
+    for (let x = startX; x < endX; x += 1) {
+      if (!coreMask[y * width + x]) continue;
+      projection[axis === "x" ? x - startX : y - startY] += 1;
+    }
+  }
+
+  const smoothed = smoothProjection(projection, Math.max(3, Math.round(length * 0.018)));
+  const nonZero = smoothed.filter(Boolean);
+  if (nonZero.length < length * 0.38) return [];
+  const max = Math.max(...smoothed);
+  const average = nonZero.reduce((sum, value) => sum + value, 0) / nonZero.length;
+  const window = Math.max(8, Math.round(length * 0.08));
+  const minSeparation = Math.max(18, Math.round(length * 0.18));
+  const candidates = [];
+
+  for (let i = Math.round(length * 0.12); i < length * 0.88; i += 1) {
+    const value = smoothed[i];
+    if (value <= 0 || value > Math.min(max * 0.82, average * 0.92)) continue;
+    const leftPeak = Math.max(...smoothed.slice(Math.max(0, i - window), i));
+    const rightPeak = Math.max(...smoothed.slice(i + 1, Math.min(length, i + window + 1)));
+    const localPeak = Math.min(leftPeak, rightPeak);
+    if (localPeak < Math.max(average * 0.82, max * 0.42)) continue;
+    if (value > localPeak * 0.72 && value > average * 0.7) continue;
+    const neighborhood = smoothed.slice(Math.max(0, i - 3), Math.min(length, i + 4));
+    if (value > Math.min(...neighborhood)) continue;
+    const previous = candidates[candidates.length - 1];
+    if (previous && i - previous.index < minSeparation) {
+      if (value < previous.value) candidates[candidates.length - 1] = { index: i, value };
+    } else {
+      candidates.push({ index: i, value });
+    }
+  }
+
+  const cuts = candidates.map((candidate) => candidate.index);
+  if (!cuts.length) return [];
+  const ranges = [];
+  let last = 0;
+  for (const cut of cuts) {
+    ranges.push([last, cut]);
+    last = cut;
+  }
+  ranges.push([last, length]);
+
+  const children = componentsFromProjectionRanges(ranges, axis, { startX, startY, endX, endY }, imageData, coreMask, minCoreArea, pad, settings);
+  if (children.length < 2) return [];
+  const parentDensity = measureComponent(component, imageData, Math.max(24, settings.supportBase)).alphaDensity;
+  const childDensity = children.reduce((sum, child) => sum + child.alphaDensity, 0) / children.length;
+  return childDensity >= parentDensity * 0.62 ? children : [];
+}
+
+function splitStackedComponent(component, imageData, coreMask, minCoreArea, pad, settings) {
+  if ((settings.mergeDistance ?? 4) > 2) return [];
+  const aspect = component.height / Math.max(1, component.width);
+  if (aspect < 1.85 || component.height < 120) return [];
+  const estimatedParts = clamp(Math.round(aspect), 2, 4);
+  const { width, height } = imageData;
+  const startX = Math.max(0, Math.floor(component.x));
+  const startY = Math.max(0, Math.floor(component.y));
+  const endX = Math.min(width, Math.ceil(component.x + component.width));
+  const endY = Math.min(height, Math.ceil(component.y + component.height));
+  const length = endY - startY;
+  if (length < 80) return [];
+
+  const projection = new Array(length).fill(0);
+  for (let y = startY; y < endY; y += 1) {
+    for (let x = startX; x < endX; x += 1) {
+      if (coreMask[y * width + x]) projection[y - startY] += 1;
+    }
+  }
+  const smoothed = smoothProjection(projection, Math.max(4, Math.round(length * 0.025)));
+  const cuts = [];
+  const searchRadius = Math.max(14, Math.round(length / estimatedParts * 0.22));
+  for (let part = 1; part < estimatedParts; part += 1) {
+    const target = Math.round((length * part) / estimatedParts);
+    let bestIndex = target;
+    let bestValue = Infinity;
+    for (let cursor = Math.max(8, target - searchRadius); cursor <= Math.min(length - 8, target + searchRadius); cursor += 1) {
+      const value = smoothed[cursor] ?? 0;
+      if (value < bestValue) {
+        bestValue = value;
+        bestIndex = cursor;
+      }
+    }
+    if (!cuts.length || bestIndex - cuts[cuts.length - 1] > length * 0.18) cuts.push(bestIndex);
+  }
+  if (!cuts.length) return [];
+
+  const ranges = [];
+  let last = 0;
+  for (const cut of cuts) {
+    ranges.push([last, cut]);
+    last = cut;
+  }
+  ranges.push([last, length]);
+  const children = componentsFromProjectionRanges(ranges, "y", { startX, startY, endX, endY }, imageData, coreMask, minCoreArea, pad, settings);
+  if (children.length < 2) return [];
+  const parentArea = measureComponent(component, imageData, Math.max(24, settings.supportBase)).alphaArea;
+  const childArea = children.reduce((sum, child) => sum + child.area, 0);
+  return childArea >= parentArea * 0.68 ? children : [];
+}
+
 function smoothProjection(values, radius) {
   const output = new Array(values.length).fill(0);
   let sum = 0;
@@ -1808,14 +3019,18 @@ function findCoreSeedsInBox(mask, width, height, box, minArea) {
   return seeds;
 }
 
-function absorbTinyMultiObjectFragments(components, imageArea, minArea) {
+function absorbTinyMultiObjectFragments(components, imageArea, minArea, settings = getSplitSettings()) {
   const sorted = [...components].sort((a, b) => b.area - a.area);
   const large = sorted.filter((component) => component.area >= Math.max(minArea, imageArea * 0.0012));
   const output = large.map((component) => ({ ...component }));
-  const absorbDistance = Math.max(6, Math.round(Math.sqrt(imageArea) / 90));
+  const absorbDistance = Math.max(2, Math.round(Math.sqrt(imageArea) * (settings.absorbScale || 0.006)));
 
   for (const component of sorted) {
     if (large.includes(component)) continue;
+    if (component.area >= imageArea * 0.00065 && settings.mergeDistance <= 4) {
+      output.push({ ...component });
+      continue;
+    }
     const target = output
       .map((candidate) => ({ candidate, distance: boxDistance(component, candidate) }))
       .filter((entry) => entry.distance <= absorbDistance)
@@ -1825,6 +3040,309 @@ function absorbTinyMultiObjectFragments(components, imageArea, minArea) {
   }
 
   return output;
+}
+
+function stabilizeTinyFragmentBurst(components, imageData, minArea, settings = getSplitSettings()) {
+  state.lastTinyFragmentDebug = { before: components.length, stage: "skip", after: components.length };
+  if (components.length <= 14) return components;
+  const { width, height } = imageData;
+  const imageArea = width * height;
+  const sorted = [...components].sort((a, b) => (b.area || 0) - (a.area || 0));
+  const output = [];
+  const absorbDistance = Math.max(4, Math.round(Math.sqrt(imageArea) * Math.max(0.012, (settings.absorbScale || 0.006) * 2.4)));
+  const tinyArea = Math.max(minArea * 0.34, imageArea * 0.00022);
+  const weakArea = Math.max(minArea * 0.62, imageArea * 0.00042);
+
+  for (const component of sorted) {
+    const measured = measureBoxAsComponent(component, imageData, Math.max(24, settings.supportBase || 22));
+    const quality = scoreSmallComponent(measured, imageArea, minArea);
+    const minDimension = Math.min(measured.width, measured.height);
+    const aspect = measured.width / Math.max(1, measured.height);
+    const lineLike = (aspect > 6.5 || aspect < 1 / 6.5) && measured.alphaDensity < 0.48;
+    const tiny = measured.area < tinyArea || minDimension <= 4;
+    const weak = quality < 0.66 || (measured.area < weakArea && measured.alphaDensity < 0.28) || lineLike;
+    const clearSmallElement = quality >= 0.82 && measured.area >= tinyArea && measured.alphaDensity >= 0.3 && minDimension >= 7;
+
+    if (!weak || clearSmallElement) {
+      output.push({ ...measured });
+      continue;
+    }
+
+    const target = output
+      .map((candidate) => ({
+        candidate,
+        distance: boxDistance(measured, candidate),
+        overlapX: axisOverlapRatio(measured.x, measured.width, candidate.x, candidate.width),
+        overlapY: axisOverlapRatio(measured.y, measured.height, candidate.y, candidate.height),
+      }))
+      .filter((entry) => entry.distance <= absorbDistance && (entry.overlapX > 0.08 || entry.overlapY > 0.08 || entry.distance <= 2))
+      .sort((a, b) => a.distance - b.distance)[0]?.candidate;
+
+    if (target) {
+      mergeBoxInto(target, measured);
+      Object.assign(target, measureBoxAsComponent(target, imageData, Math.max(24, settings.supportBase || 22)));
+    } else if (!tiny && quality >= 0.74) {
+      output.push({ ...measured });
+    }
+  }
+
+  if (output.length < Math.max(2, components.length * 0.38)) return components;
+  const compacted = compactNearbySmallComponents(output, imageData, minArea, settings);
+  state.lastTinyFragmentDebug = {
+    before: components.length,
+    stage: compacted.length < output.length ? "compact" : "filter",
+    after: compacted.length,
+  };
+  return compacted.map((component, index) => ({ ...component, id: index + 1 }));
+}
+
+function compactNearbySmallComponents(components, imageData, minArea, settings = getSplitSettings()) {
+  if (components.length <= 14) return components;
+  const { width, height } = imageData;
+  const imageArea = width * height;
+  const alphaThreshold = Math.max(24, settings.supportBase || 22);
+  const targetCount = 14;
+  const clusterDistance = Math.max(8, Math.round(Math.sqrt(imageArea) * 0.035));
+  const smallBoxRatio = 0.018;
+  const boxes = components.map((component) => measureBoxAsComponent(component, imageData, alphaThreshold));
+
+  while (boxes.length > targetCount) {
+    let best = null;
+    for (let i = 0; i < boxes.length; i += 1) {
+      for (let j = i + 1; j < boxes.length; j += 1) {
+        const a = boxes[i];
+        const b = boxes[j];
+        const distance = boxDistance(a, b);
+        if (distance > clusterDistance) continue;
+        const aBoxRatio = (a.width * a.height) / imageArea;
+        const bBoxRatio = (b.width * b.height) / imageArea;
+        const smallerBoxRatio = Math.min(aBoxRatio, bBoxRatio);
+        if (aBoxRatio > smallBoxRatio && bBoxRatio > smallBoxRatio) continue;
+        const overlapX = axisOverlapRatio(a.x, a.width, b.x, b.width);
+        const overlapY = axisOverlapRatio(a.y, a.height, b.y, b.height);
+        if (overlapX < 0.04 && overlapY < 0.04 && distance > clusterDistance * 0.55) continue;
+        const merged = measureBoxAsComponent(mergedBox(a, b), imageData, alphaThreshold);
+        const weightedDensity = (
+          a.alphaDensity * a.width * a.height +
+          b.alphaDensity * b.width * b.height
+        ) / Math.max(1, a.width * a.height + b.width * b.height);
+        if (merged.alphaDensity < weightedDensity * 0.58) continue;
+        const score = distance + smallerBoxRatio * 1800 + (1 - Math.max(overlapX, overlapY)) * 12;
+        if (!best || score < best.score) best = { i, j, merged, score };
+      }
+    }
+    if (!best) break;
+    boxes[best.i] = best.merged;
+    boxes.splice(best.j, 1);
+  }
+
+  return boxes;
+}
+
+function stabilizeOverSplitComponents(components, imageData, coreMask, supportThreshold, minCoreArea, minArea, pad, settings = getSplitSettings()) {
+  state.lastOverSplitDebug = { before: components.length, stage: "skip", grouped: 0, clustered: 0, accepted: components.length };
+  if (components.length <= 18) return components;
+  const { width, height } = imageData;
+  const imageArea = width * height;
+  const supportMask = createAlphaMask(imageData, Math.max(14, supportThreshold));
+  const radius = Math.max(3, Math.min(9, Math.round(Math.sqrt(imageArea) * 0.012)));
+  const groupedMask = dilateMask(supportMask, width, height, radius);
+  let grouped = findComponentsFromMask(groupedMask, width, height, Math.max(minArea, minCoreArea * 2), Math.max(pad, radius))
+    .map((component) => measureBoxAsComponent(component, imageData, Math.max(24, supportThreshold)))
+    .filter((component) => keepMultiObjectComponent(component, imageArea, minArea));
+
+  state.lastOverSplitDebug = { before: components.length, stage: "mask", grouped: grouped.length, clustered: 0, accepted: components.length };
+  if (!grouped.length) return components;
+  if (grouped.length === 1) {
+    const forced = forceProjectionSplitOverSplitComponent(grouped[0], imageData, coreMask, minCoreArea, pad, settings);
+    if (forced.length >= 3 && forced.length <= 24) {
+      state.lastOverSplitDebug = { before: components.length, stage: "forced-projection", grouped: 1, clustered: forced.length, accepted: forced.length };
+      return forced;
+    }
+  }
+
+  grouped = splitLargeComponents(grouped, imageData, coreMask, width, height, minCoreArea, pad, {
+    ...settings,
+    mergeDistance: Math.min(settings.mergeDistance ?? 4, 4),
+    splitPaddingFactor: Math.min(settings.splitPaddingFactor ?? 0.8, 0.8),
+  });
+  grouped = mergeAssetFragments(grouped, imageData, Math.max(24, supportThreshold), {
+    ...settings,
+    mergeDistance: Math.max(settings.mergeDistance ?? 4, 5),
+  });
+  grouped = grouped.filter((component) => keepMultiObjectComponent(component, imageArea, minArea));
+
+  if (grouped.length < 2 || grouped.length > Math.max(32, components.length * 0.65)) {
+    const maskCount = grouped.length;
+    grouped = clusterOverSplitFragments(components, imageData, coreMask, supportThreshold, minCoreArea, minArea, pad, settings);
+    state.lastOverSplitDebug = { before: components.length, stage: "cluster", grouped: maskCount, clustered: grouped.length, accepted: components.length };
+  }
+  if (grouped.length < 2 || grouped.length > Math.max(32, components.length * 0.85)) return components;
+  const groupedArea = grouped.reduce((sum, component) => sum + (component.area || 0), 0);
+  const originalArea = components.reduce((sum, component) => sum + (component.area || 0), 0);
+  if (groupedArea < originalArea * 0.48) return components;
+  state.lastOverSplitDebug = { before: components.length, stage: "accepted", grouped: grouped.length, clustered: grouped.length, accepted: grouped.length };
+  return grouped;
+}
+
+function forceProjectionSplitOverSplitComponent(component, imageData, coreMask, minCoreArea, pad, settings = getSplitSettings()) {
+  const vertical = forceProjectionSplitAxis(component, imageData, coreMask, "x", minCoreArea, pad, settings);
+  if (vertical.length >= 2) return vertical;
+  return forceProjectionSplitAxis(component, imageData, coreMask, "y", minCoreArea, pad, settings);
+}
+
+function forceProjectionSplitAxis(component, imageData, coreMask, axis, minCoreArea, pad, settings = getSplitSettings()) {
+  const { width, height, data } = imageData;
+  const startX = Math.max(0, Math.floor(component.x));
+  const startY = Math.max(0, Math.floor(component.y));
+  const endX = Math.min(width, Math.ceil(component.x + component.width));
+  const endY = Math.min(height, Math.ceil(component.y + component.height));
+  const length = axis === "x" ? endX - startX : endY - startY;
+  const crossLength = axis === "x" ? endY - startY : endX - startX;
+  if (length < 80 || crossLength < 24) return [];
+
+  const projection = new Array(length).fill(0);
+  const alphaThreshold = Math.max(24, settings.supportBase);
+  for (let y = startY; y < endY; y += 1) {
+    for (let x = startX; x < endX; x += 1) {
+      if (data[(y * width + x) * 4 + 3] < alphaThreshold) continue;
+      projection[axis === "x" ? x - startX : y - startY] += 1;
+    }
+  }
+
+  const smoothed = smoothProjection(projection, Math.max(4, Math.round(length * 0.022)));
+  const nonZero = smoothed.filter(Boolean);
+  if (nonZero.length < length * 0.28) return [];
+  const max = Math.max(...smoothed);
+  const average = nonZero.reduce((sum, value) => sum + value, 0) / nonZero.length;
+  const window = Math.max(10, Math.round(length * 0.1));
+  const minSeparation = Math.max(16, Math.round(length * 0.12));
+  const candidates = [];
+
+  for (let i = Math.round(length * 0.1); i < length * 0.9; i += 1) {
+    const value = smoothed[i] || 0;
+    const leftPeak = Math.max(...smoothed.slice(Math.max(0, i - window), i));
+    const rightPeak = Math.max(...smoothed.slice(i + 1, Math.min(length, i + window + 1)));
+    const localPeak = Math.min(leftPeak, rightPeak);
+    if (localPeak < Math.max(average * 0.72, max * 0.28)) continue;
+    if (value > Math.max(average * 0.72, localPeak * 0.68)) continue;
+    const local = smoothed.slice(Math.max(0, i - 4), Math.min(length, i + 5));
+    if (value > Math.min(...local)) continue;
+    const previous = candidates[candidates.length - 1];
+    if (previous && i - previous.index < minSeparation) {
+      if (value < previous.value) candidates[candidates.length - 1] = { index: i, value };
+    } else {
+      candidates.push({ index: i, value });
+    }
+  }
+
+  const cuts = candidates
+    .map((candidate) => candidate.index)
+    .filter((cut) => cut > length * 0.08 && cut < length * 0.92)
+    .slice(0, 8);
+  if (cuts.length === 1 && length >= 140) {
+    const cut = cuts[0];
+    const leftSize = cut;
+    const rightSize = length - cut;
+    const extra = leftSize >= rightSize
+      ? bestSupplementalProjectionCut(smoothed, 0, cut, average, max)
+      : bestSupplementalProjectionCut(smoothed, cut, length, average, max);
+    if (extra > 0 && Math.abs(extra - cut) >= Math.max(14, length * 0.1)) cuts.push(extra);
+    cuts.sort((a, b) => a - b);
+  }
+  if (!cuts.length) return [];
+  const ranges = [];
+  let last = 0;
+  for (const cut of cuts) {
+    ranges.push([last, cut]);
+    last = cut;
+  }
+  ranges.push([last, length]);
+  const relaxedSettings = { ...settings, splitPaddingFactor: Math.min(settings.splitPaddingFactor ?? 0.8, 0.65) };
+  const children = componentsFromProjectionRanges(ranges, axis, { startX, startY, endX, endY }, imageData, coreMask, minCoreArea, pad, relaxedSettings);
+  if (children.length < 2) return [];
+  const parentArea = Math.max(1, component.area || measureComponent(component, imageData, alphaThreshold).alphaArea);
+  const childArea = children.reduce((sum, child) => sum + (child.area || 0), 0);
+  if (childArea < parentArea * 0.42) return [];
+  return children;
+}
+
+function bestSupplementalProjectionCut(smoothed, start, end, average, max) {
+  const length = smoothed.length;
+  const rangeLength = end - start;
+  if (rangeLength < Math.max(50, length * 0.22)) return -1;
+  const innerStart = Math.round(start + rangeLength * 0.26);
+  const innerEnd = Math.round(start + rangeLength * 0.74);
+  let bestIndex = -1;
+  let bestValue = Infinity;
+  for (let index = innerStart; index <= innerEnd; index += 1) {
+    const value = smoothed[index] || 0;
+    const local = smoothed.slice(Math.max(start, index - 5), Math.min(end, index + 6));
+    if (value > Math.min(...local)) continue;
+    if (value > Math.max(average * 0.86, max * 0.72)) continue;
+    if (value < bestValue) {
+      bestValue = value;
+      bestIndex = index;
+    }
+  }
+  return bestIndex;
+}
+
+function clusterOverSplitFragments(components, imageData, coreMask, supportThreshold, minCoreArea, minArea, pad, settings = getSplitSettings()) {
+  const { width, height } = imageData;
+  const imageArea = width * height;
+  const clusterDistance = Math.max(10, Math.min(width, height) * 0.045);
+  const parent = components.map((_, index) => index);
+  const find = (index) => {
+    while (parent[index] !== index) {
+      parent[index] = parent[parent[index]];
+      index = parent[index];
+    }
+    return index;
+  };
+  const unite = (a, b) => {
+    const rootA = find(a);
+    const rootB = find(b);
+    if (rootA !== rootB) parent[rootB] = rootA;
+  };
+
+  for (let i = 0; i < components.length; i += 1) {
+    for (let j = i + 1; j < components.length; j += 1) {
+      const a = components[i];
+      const b = components[j];
+      const distance = boxDistance(a, b);
+      const overlapX = axisOverlapRatio(a.x, a.width, b.x, b.width);
+      const overlapY = axisOverlapRatio(a.y, a.height, b.y, b.height);
+      const centerDistance = Math.hypot((a.x + a.width / 2) - (b.x + b.width / 2), (a.y + a.height / 2) - (b.y + b.height / 2));
+      const connectedParts = distance <= clusterDistance && (overlapX > 0.04 || overlapY > 0.04);
+      const nearbyTinyParts = Math.min(a.area, b.area) < imageArea * 0.0015 && centerDistance <= clusterDistance * 1.8;
+      if (connectedParts || nearbyTinyParts) unite(i, j);
+    }
+  }
+
+  const clusters = new Map();
+  for (let index = 0; index < components.length; index += 1) {
+    const root = find(index);
+    const cluster = clusters.get(root) || [];
+    cluster.push(components[index]);
+    clusters.set(root, cluster);
+  }
+
+  let grouped = [...clusters.values()].map((cluster, index) => {
+    const merged = cluster.reduce((box, component) => {
+      if (!box) return { ...component, id: index + 1 };
+      mergeBoxInto(box, component);
+      return box;
+    }, null);
+    return measureBoxAsComponent(merged, imageData, Math.max(24, supportThreshold));
+  }).filter((component) => keepMultiObjectComponent(component, imageArea, minArea));
+
+  grouped = splitLargeComponents(grouped, imageData, coreMask, width, height, minCoreArea, pad, {
+    ...settings,
+    mergeDistance: Math.min(settings.mergeDistance ?? 4, 4),
+  });
+  grouped = grouped.filter((component) => keepMultiObjectComponent(component, imageArea, minArea));
+  return grouped;
 }
 
 function mergeAssetFragments(components, imageData, alphaThreshold, settings = getSplitSettings()) {
@@ -1852,6 +3370,9 @@ function shouldMergeAssetBoxes(a, b, imageData, alphaThreshold, settings = getSp
   const imageArea = imageData.width * imageData.height;
   const bothMeaningful = a.area > imageArea * 0.003 && b.area > imageArea * 0.003;
   const overlapRatio = boxOverlapRatio(a, b);
+  if (bothMeaningful && hasWeakAlphaBridge(a, b, imageData, alphaThreshold, settings)) return false;
+  if (shouldAttachSmallPart(a, b, imageData, distance)) return true;
+  if (bothMeaningful && settings.mergeDistance <= 4 && distance > settings.mergeDistance && overlapRatio < 0.36) return false;
   if (bothMeaningful && settings.mergeDistance <= 4 && overlapRatio < 0.22) return false;
   if (bothMeaningful && settings.mergeDistance <= 6 && distance > 0 && overlapRatio < 0.14) return false;
   if (bothMeaningful && hasTransparentSeparator(a, b, imageData, alphaThreshold)) return false;
@@ -1864,6 +3385,26 @@ function shouldMergeAssetBoxes(a, b, imageData, alphaThreshold, settings = getSp
   const weightedDensity = (densityA * a.width * a.height + densityB * b.width * b.height) / Math.max(1, a.width * a.height + b.width * b.height);
   if (bothMeaningful && mergedMetrics.alphaDensity < weightedDensity * 0.65) return false;
   return smallerArea < imageArea * 0.0015 || distance <= settings.mergeDistance || overlapRatio > 0.45;
+}
+
+function shouldAttachSmallPart(a, b, imageData, distance) {
+  const imageArea = imageData.width * imageData.height;
+  const smaller = a.area <= b.area ? a : b;
+  const larger = smaller === a ? b : a;
+  const areaRatio = smaller.area / Math.max(1, larger.area);
+  if (areaRatio > 0.34 || smaller.area > imageArea * 0.018) return false;
+  const attachDistance = Math.max(16, Math.min(imageData.width, imageData.height) * 0.038);
+  if (distance > attachDistance) return false;
+  const horizontalOverlap = axisOverlapRatio(smaller.x, smaller.width, larger.x, larger.width);
+  const verticalOverlap = axisOverlapRatio(smaller.y, smaller.height, larger.y, larger.height);
+  const nearSideAttachment = verticalOverlap > 0.18 && distance <= attachDistance;
+  const nearTopBottomAttachment = horizontalOverlap > 0.2 && distance <= attachDistance;
+  return nearSideAttachment || nearTopBottomAttachment;
+}
+
+function axisOverlapRatio(aStart, aSize, bStart, bSize) {
+  const overlap = Math.max(0, Math.min(aStart + aSize, bStart + bSize) - Math.max(aStart, bStart));
+  return overlap / Math.max(1, Math.min(aSize, bSize));
 }
 
 function hasTransparentSeparator(a, b, imageData, alphaThreshold) {
@@ -1884,6 +3425,22 @@ function hasTransparentSeparator(a, b, imageData, alphaThreshold) {
     }
   }
   return total > 0 && opaque / total < 0.025;
+}
+
+function hasWeakAlphaBridge(a, b, imageData, alphaThreshold, settings = getSplitSettings()) {
+  if ((settings.mergeDistance ?? 4) > 6) return false;
+  const centerA = { x: a.x + a.width / 2, y: a.y + a.height / 2 };
+  const centerB = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  const axis = Math.abs(centerA.x - centerB.x) >= Math.abs(centerA.y - centerB.y) ? "x" : "y";
+  const cut = axis === "x" ? Math.round((centerA.x + centerB.x) / 2) : Math.round((centerA.y + centerB.y) / 2);
+  const merged = mergedBox(a, b);
+  const supportDensity = projectionStripDensity(merged, imageData.data, imageData.width, imageData.height, axis, cut, Math.max(18, alphaThreshold));
+  const strongDensity = projectionStripDensity(merged, imageData.data, imageData.width, imageData.height, axis, cut, Math.max(80, alphaThreshold * 2.4));
+  const overlap = axis === "x"
+    ? axisOverlapRatio(a.y, a.height, b.y, b.height)
+    : axisOverlapRatio(a.x, a.width, b.x, b.width);
+  if (overlap < 0.12) return false;
+  return strongDensity <= 0.04 && supportDensity <= 0.28;
 }
 
 function gapRectBetweenBoxes(a, b) {
@@ -2121,7 +3678,8 @@ function filterBadComponents(components, imageWidth, imageHeight) {
     const tooSparseHuge = component.boxRatio > 0.7 && component.alphaDensity < 0.18;
     const mostlyEmpty = component.boxRatio > 0.25 && component.alphaDensity < 0.08;
     const residualLine = (aspect > 8 || aspect < 0.125) && component.alphaDensity < 0.22;
-    const tinyNoise = component.alphaArea < imageArea * 0.0005;
+    const smallElementScore = scoreSmallComponent(component, imageArea, Math.max(8, imageArea * 0.001));
+    const tinyNoise = component.alphaArea < imageArea * 0.0005 && smallElementScore < 0.68;
     return !tooSparseHuge && !mostlyEmpty && !residualLine && !tinyNoise;
   });
 }
@@ -2659,9 +4217,15 @@ function renderCards() {
     split.textContent = "拆分";
     split.addEventListener("click", () => splitComponentById(component.id));
 
+    const adjust = document.createElement("button");
+    adjust.type = "button";
+    adjust.className = "ghost";
+    adjust.textContent = "调整";
+    adjust.addEventListener("click", () => loadComponentIntoManualSelection(component.id));
+
     const actions = document.createElement("div");
     actions.className = "asset-actions";
-    actions.append(button, split, remove);
+    actions.append(button, split, adjust, remove);
 
     card.addEventListener("mouseenter", () => {
       drawOverlay(component.id);
@@ -2923,6 +4487,90 @@ function mergeSelectedComponents() {
   setSuccess(`已合并 ${selected.length} 个元素。`);
 }
 
+function loadComponentIntoManualSelection(componentId) {
+  const component = state.components.find((candidate) => candidate.id === componentId);
+  if (!component || !els.resultCanvas.width) return;
+  if (!state.manual) {
+    state.manual = true;
+    els.manualModeBtn.textContent = "关闭框选";
+    els.overlayCanvas.closest(".checker")?.classList.add("manual");
+    updateUiState();
+  }
+  state.selectedComponentIds = new Set([component.id]);
+  state.selection = {
+    x: Math.round(component.x),
+    y: Math.round(component.y),
+    width: Math.round(component.width),
+    height: Math.round(component.height),
+  };
+  updateManualPreview();
+  renderCards();
+  drawOverlay(component.id);
+  setStatus("已载入元素框，可拖拽重新框选或用方向键微调后点击“更新选中元素”。", "调整元素框");
+}
+
+function addSelectionAsComponent() {
+  const box = getValidManualSelection();
+  if (!box) return;
+  const component = measurePreviewBoxAsComponent(box);
+  state.components = renumberComponents([...state.components, component]);
+  const added = state.components.find((candidate) => sameBox(candidate, component));
+  state.selectedComponentIds = added ? new Set([added.id]) : new Set();
+  persistComponents(`${state.components.length} 个元素`);
+  renderCards();
+  drawOverlay(added?.id || null);
+  setSuccess(`已添加元素框：${box.width} x ${box.height}。`);
+}
+
+function applySelectionToSelectedComponent() {
+  const box = getValidManualSelection();
+  const selected = [...state.selectedComponentIds];
+  if (!box || selected.length !== 1) return;
+  const componentId = selected[0];
+  const next = measurePreviewBoxAsComponent({ ...box, id: componentId });
+  state.components = state.components.map((component) => component.id === componentId ? { ...next, id: component.id } : component);
+  persistComponents(`${state.components.length} 个元素`);
+  const updated = state.components.find((component) => sameBox(component, next));
+  state.selectedComponentIds = updated ? new Set([updated.id]) : new Set();
+  renderCards();
+  drawOverlay(updated?.id || null);
+  setSuccess(`已更新元素 ${String((updated?.id || componentId)).padStart(2, "0")} 的裁切框。`);
+}
+
+function getValidManualSelection() {
+  if (!state.selection || state.selection.width < 4 || state.selection.height < 4) return null;
+  return {
+    x: Math.round(clamp(state.selection.x, 0, els.resultCanvas.width - 1)),
+    y: Math.round(clamp(state.selection.y, 0, els.resultCanvas.height - 1)),
+    width: Math.max(1, Math.round(Math.min(state.selection.width, els.resultCanvas.width - state.selection.x))),
+    height: Math.max(1, Math.round(Math.min(state.selection.height, els.resultCanvas.height - state.selection.y))),
+  };
+}
+
+function measurePreviewBoxAsComponent(box) {
+  const source = state.refinedCutoutCanvas.width ? state.refinedCutoutCanvas : els.resultCanvas;
+  const ratioX = source.width / Math.max(1, els.resultCanvas.width);
+  const ratioY = source.height / Math.max(1, els.resultCanvas.height);
+  const sx = Math.round(box.x * ratioX);
+  const sy = Math.round(box.y * ratioY);
+  const sw = Math.max(1, Math.round(box.width * ratioX));
+  const sh = Math.max(1, Math.round(box.height * ratioY));
+  const ctx = source.getContext("2d", { willReadFrequently: true });
+  const imageData = ctx.getImageData(sx, sy, sw, sh);
+  let area = 0;
+  for (let index = 3; index < imageData.data.length; index += 4) {
+    if (imageData.data[index] > Math.max(8, Number(els.alphaThreshold.value))) area += 1;
+  }
+  return {
+    id: box.id || state.components.length + 1,
+    x: box.x,
+    y: box.y,
+    width: box.width,
+    height: box.height,
+    area: Math.max(1, Math.round(area / Math.max(0.0001, ratioX * ratioY))),
+  };
+}
+
 function sameBox(a, b) {
   return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
 }
@@ -2952,14 +4600,389 @@ function updateSelectionButtons() {
     : selectedCount
       ? `下载选中 ${selectedCount} 个 ZIP`
       : "下载选中元素 ZIP";
+  updateManualSelectionActions();
+}
+
+function computeCurrentQaMetrics() {
+  if (!state.refinedCutoutCanvas.width) return null;
+  const settings = getRefineSettings();
+  const matteQuality = analyzeMatteQuality(state.refinedCutoutCanvas, state.sourceOriginalCanvas, settings);
+  const componentCount = state.components.length;
+  const canvasArea = Math.max(1, els.resultCanvas.width * els.resultCanvas.height);
+  const preset = getAlgorithmPreset(state.currentItem?.imageType || state.imageType || "unknown");
+  const largeBoxRiskRatio = getPresetConfig(preset).detection.largeBoxRiskRatio;
+  const vectorSettings = getVectorSettings();
+  const tinyDebugRelevant = (els.detectMode.value === "split" || preset === "multiSticker")
+    && state.lastTinyFragmentDebug?.after === componentCount;
+  const tinyDebug = tinyDebugRelevant ? state.lastTinyFragmentDebug : null;
+  const smallComponentCount = state.components.filter((component) => {
+    const boxRatio = (component.width * component.height) / canvasArea;
+    return boxRatio > 0 && boxRatio < 0.012;
+  }).length;
+  const largeBoxRiskRelevant = els.detectMode.value === "split" || els.detectMode.value === "illustration" || preset === "multiSticker";
+  let largeBoxRisk = largeBoxRiskRelevant && state.components.some((component) => {
+    const boxRatio = (component.width * component.height) / canvasArea;
+    return boxRatio > largeBoxRiskRatio || (boxRatio > largeBoxRiskRatio * 0.62 && component.area / Math.max(1, component.width * component.height) < 0.28);
+  });
+  if (largeBoxRisk && state.lastOverSplitDebug?.stage === "forced-projection" && componentCount >= 3 && componentCount <= 10) {
+    largeBoxRisk = false;
+  }
+  const svgMetrics = estimateSvgMetrics(state.refinedCutoutCanvas);
+  const metrics = {
+    imageType: state.currentItem?.imageType || state.imageType || "unknown",
+    preset,
+    svgMode: vectorSettings.mode,
+    svgColorStep: vectorSettings.colorStep,
+    alphaCoverage: roundMetric(matteQuality.alphaCoverage),
+    edgeJaggednessScore: roundMetric(matteQuality.edgeJaggednessScore),
+    semiTransparentCoreRatio: roundMetric(matteQuality.semiTransparentCoreRatio),
+    lightRegionLossRatio: roundMetric(matteQuality.lightRegionLossRatio),
+    lineArtLossRatio: roundMetric(matteQuality.lineArtLossRatio),
+    whiteFringeRatio: roundMetric(matteQuality.whiteFringeRatio),
+    whiteFringePixels: Math.round(matteQuality.whiteFringePixels || 0),
+    whiteFringeEdgePixels: Math.round(matteQuality.whiteFringeEdgePixels || 0),
+    whiteFringeAreaRatio: roundMetric(matteQuality.whiteFringeAreaRatio),
+    lowAlphaWhiteFringeRatio: roundMetric(matteQuality.lowAlphaWhiteFringeRatio),
+    whiteFringeAverageAlpha: roundMetric(matteQuality.whiteFringeAverageAlpha),
+    componentCount,
+    smallComponentCount,
+    overSplitBefore: state.lastOverSplitDebug?.before || componentCount,
+    overSplitStage: state.lastOverSplitDebug?.stage || "",
+    overSplitGrouped: state.lastOverSplitDebug?.grouped || 0,
+    overSplitClustered: state.lastOverSplitDebug?.clustered || 0,
+    overSplitAccepted: state.lastOverSplitDebug?.accepted || componentCount,
+    tinyFragmentBefore: tinyDebug?.before || componentCount,
+    tinyFragmentStage: tinyDebug?.stage || "",
+    tinyFragmentAfter: tinyDebug?.after || componentCount,
+    smallElementRisk: preset === "multiSticker" && componentCount < 3 && smallComponentCount === 0,
+    largeBoxRisk,
+    svgPathCount: svgMetrics.pathCount,
+    svgCommandCount: svgMetrics.commandCount,
+    svgVisibleArea: svgMetrics.visibleArea,
+    svgCommandDensity: roundMetric(svgMetrics.commandDensity),
+    svgGridAlignedRatio: roundMetric(svgMetrics.gridAlignedRatio),
+    svgBlockyRisk: svgMetrics.blockyRisk,
+    warnings: matteQuality.warnings || [],
+  };
+  window.__cutoutQaCurrentMetrics = metrics;
+  return metrics;
+}
+
+function buildQaMetricsForItem(item) {
+  if (item === state.currentItem && state.refinedCutoutCanvas.width) {
+    item.qaMetrics = computeCurrentQaMetrics();
+  }
+  return item.qaMetrics || item.matteQuality || null;
+}
+
+function scoreQaRow(row, item = null) {
+  const metrics = row.metrics || {};
+  const scenario = row.scenario || item?.qaScenario || "";
+  const priority = row.priority || item?.qaPriority || "";
+  const recommendedMode = recommendedDetectModeForScenario(scenario);
+  const statusDone = row.status === "done";
+  const matteScore = scoreMatteQuality(metrics, scenario);
+  const componentScore = scoreComponentQuality(metrics, scenario);
+  const svgScore = scoreSvgQuality(metrics, scenario);
+  const exportScore = statusDone && row.resultSize ? 5 : statusDone ? 4 : 1;
+  const scores = { matte: matteScore, components: componentScore, svg: svgScore, export: exportScore };
+  const average = roundMetric((scores.matte + scores.components + scores.svg + scores.export) / 4);
+  const coreLow = Object.entries(scores)
+    .filter(([, value]) => value < 3)
+    .map(([key]) => key);
+  const criticalScenario = /发丝|毛|商品|贴纸|多元素|靠近|小物体/.test(scenario);
+  const releaseBlocker = coreLow.length > 0 || average < 4 || (criticalScenario && Math.min(scores.matte, scores.components) < 3.5);
+  const notes = [];
+  if (metrics.largeBoxRisk) notes.push("大框风险");
+  if (metrics.smallElementRisk) notes.push("小元素漏识别风险");
+  if (metrics.svgBlockyRisk) notes.push("SVG 块状风险");
+  if (!isTransparentMaterialScenario(scenario) && (metrics.semiTransparentCoreRatio || 0) > 0.36) notes.push("主体半透明风险");
+  if (isIllustrationQualityScenario(scenario) && (metrics.lineArtLossRatio || 0) > 0.24) notes.push("线稿断裂风险");
+  if (isIllustrationQualityScenario(scenario) && (metrics.lightRegionLossRatio || 0) > 0.28) notes.push("浅色区域缺失风险");
+  if (recommendedMode && row.mode && row.mode !== recommendedMode) notes.push(`建议模式：${modeLabel(recommendedMode)}`);
+  return { scores, average, pass: average >= 4 && !coreLow.length, releaseBlocker, coreLow, recommendedMode, notes };
+}
+
+function recommendedDetectModeForScenario(scenario = "") {
+  if (/贴纸合集|靠近多角色|小物体细节|插画图标/.test(scenario)) return "split";
+  if (/发丝|卷发|宠物|复杂背景|商品|透明材质|高对比边缘/.test(scenario)) return "subject";
+  return "";
+}
+
+function modeLabel(mode) {
+  if (mode === "split") return "元素拆分";
+  if (mode === "subject") return "主体切图";
+  if (mode === "complete" || mode === "foreground") return "完整前景";
+  if (mode === "illustration") return "色块拆分";
+  return mode || "";
+}
+
+function batchModeForItem(item, fallbackMode = els.detectMode.value) {
+  if (!item?.isQa) return fallbackMode;
+  return recommendedDetectModeForScenario(item.qaScenario || "") || fallbackMode;
+}
+
+function setDetectModeValue(mode) {
+  if (!mode || els.detectMode.value === mode) return;
+  els.detectMode.value = mode;
+  updateUiState();
+}
+
+function scoreMatteQuality(metrics, scenario = "") {
+  let score = 5;
+  const edge = metrics.edgeJaggednessScore || 0;
+  const semi = metrics.semiTransparentCoreRatio || 0;
+  const lineLoss = metrics.lineArtLossRatio || 0;
+  const lightLoss = metrics.lightRegionLossRatio || 0;
+  const fringe = metrics.whiteFringeRatio || 0;
+  const fringeArea = metrics.whiteFringeAreaRatio || 0;
+  const fringeAlpha = metrics.whiteFringeAverageAlpha || 0;
+  const lowAlphaFringe = metrics.lowAlphaWhiteFringeRatio || 0;
+  if (!isTransparentMaterialScenario(scenario)) {
+    if (semi > 0.36) score -= 2.2;
+    else if (semi > 0.24) score -= 1.4;
+    else if (semi > 0.14) score -= 0.7;
+  }
+  if (edge > 0.42) score -= 1.1;
+  else if (edge > 0.3) score -= 0.6;
+  const mostlySubtleFringe = lowAlphaFringe > 0.9 && fringeAlpha < 24 && fringeArea < 0.002;
+  if (fringe > 0.08) score -= mostlySubtleFringe ? 0.35 : 1;
+  else if (fringe > 0.04) score -= mostlySubtleFringe ? 0.1 : 0.45;
+  if (/插画|图标|贴纸|logo|文字|靠近/.test(scenario)) {
+    if (lineLoss > 0.24) score -= 1.6;
+    else if (lineLoss > 0.16) score -= 0.9;
+    if (lightLoss > 0.28) score -= 1.4;
+    else if (lightLoss > 0.18) score -= 0.8;
+  }
+  return clampScore(score);
+}
+
+function isTransparentMaterialScenario(scenario = "") {
+  return /透明材质|透明/.test(scenario || "");
+}
+
+function isIllustrationQualityScenario(scenario = "") {
+  return /插画|图标|贴纸|logo|文字|靠近|高对比/.test(scenario || "");
+}
+
+function scoreComponentQuality(metrics, scenario = "") {
+  const count = metrics.componentCount || 0;
+  let score = count ? 5 : 1;
+  const expected = expectedComponentRange(scenario);
+  if (expected.min > 1) {
+    if (count < expected.min) score -= Math.min(3, (expected.min - count) * 0.75);
+    if (count > expected.max) score -= Math.min(2, (count - expected.max) * 0.18);
+  } else if (count > expected.max) {
+    score -= Math.min(2, (count - expected.max) * 0.18);
+  }
+  if (metrics.largeBoxRisk) score -= /多元素|靠近|贴纸|小物体|图标/.test(scenario) ? 1.5 : 0.8;
+  if (metrics.smallElementRisk) score -= 1.2;
+  return clampScore(score);
+}
+
+function expectedComponentRange(scenario = "") {
+  if (/贴纸合集/.test(scenario)) return { min: 6, max: 16 };
+  if (/靠近多角色/.test(scenario)) return { min: 3, max: 10 };
+  if (/小物体细节/.test(scenario)) return { min: 3, max: 14 };
+  if (/插画图标/.test(scenario)) return { min: 3, max: 12 };
+  return { min: 1, max: 8 };
+}
+
+function scoreSvgQuality(metrics, scenario = "") {
+  if (!/插画|图标|贴纸|logo|文字|商品|靠近/.test(scenario)) return 4;
+  let score = 5;
+  const density = metrics.svgCommandDensity || 0;
+  const pathCount = metrics.svgPathCount || 0;
+  const gridAligned = metrics.svgGridAlignedRatio ?? 1;
+  if (metrics.svgBlockyRisk) score -= 1.4;
+  if (gridAligned > 0.72 && /插画|图标|贴纸|靠近/.test(scenario)) score -= 0.5;
+  else if (gridAligned < 0.32 && density < 9 && /插画|图标|贴纸|靠近/.test(scenario)) score += 0.25;
+  if (density > 22) score -= 1.2;
+  else if (density > 16) score -= 0.7;
+  if (pathCount > 220) score -= gridAligned < 0.32 && density < 10 ? 0.65 : 1;
+  else if (pathCount > 120) score -= gridAligned < 0.32 && density < 9 ? 0.2 : 0.45;
+  return clampScore(score);
+}
+
+function clampScore(value) {
+  return Math.max(1, Math.min(5, Math.round(value * 10) / 10));
+}
+
+function estimateSvgMetrics(canvas) {
+  if (!canvas?.width) return { pathCount: 0, commandCount: 0, visibleArea: 0, commandDensity: 0, gridAlignedRatio: 0, blockyRisk: false };
+  const vectorSettings = getVectorSettings();
+  const source = prepareVectorCanvas(canvas, vectorSettings.maxEdge);
+  const ctx = source.getContext("2d", { willReadFrequently: true });
+  const imageData = ctx.getImageData(0, 0, source.width, source.height);
+  const groups = imageDataToVectorRegions(imageData, Math.max(8, Number(vectorSettings.alphaThreshold) || Number(els.cleanup.value) || 24), vectorSettings);
+  const summary = [...groups.values()].reduce((acc, group) => {
+    const commands = countSvgPathCommands(group.path);
+    const gridCounts = measureGridAlignedCoordinateCounts(group.path);
+    acc.pathCount += group.regionCount || 1;
+    acc.commandCount += commands;
+    acc.visibleArea += group.area || 0;
+    acc.gridAlignedValues += gridCounts.aligned;
+    acc.coordinateValues += gridCounts.total;
+    return acc;
+  }, { pathCount: 0, commandCount: 0, visibleArea: 0, commandDensity: 0, gridAlignedRatio: 0, gridAlignedValues: 0, coordinateValues: 0, blockyRisk: false });
+  summary.commandDensity = summary.commandCount / Math.max(1, Math.sqrt(summary.visibleArea));
+  summary.gridAlignedRatio = summary.gridAlignedValues / Math.max(1, summary.coordinateValues);
+  summary.blockyRisk = summary.visibleArea > 0 && (
+    summary.commandDensity > 18 ||
+    (vectorSettings.mode === "precise" && summary.commandDensity > 14 && summary.pathCount > 60) ||
+    (vectorSettings.mode === "precise" && summary.gridAlignedRatio > 0.62 && summary.commandCount > 24)
+  );
+  return summary;
+}
+
+function countSvgPathCommands(path) {
+  return (path.match(/[MLQCZ]/g) || []).length;
+}
+
+function measureGridAlignedCoordinateCounts(path) {
+  const values = path.match(/-?\d+(?:\.\d+)?/g)?.map(Number) || [];
+  const aligned = values.filter((value) => Math.abs(value - Math.round(value)) < 0.035).length;
+  return { aligned, total: values.length };
+}
+
+function roundMetric(value) {
+  return Math.round((Number(value) || 0) * 10000) / 10000;
+}
+
+function generateQaReportHtml(report) {
+  const summary = summarizeQaReport(report);
+  const rows = (report.rows || []).map((row) => {
+    const metrics = row.metrics || {};
+    const risk = metrics.largeBoxRisk ? "是" : "否";
+    const smallRisk = metrics.smallElementRisk ? "是" : "否";
+    const svgRisk = metrics.svgBlockyRisk ? "是" : "否";
+    const score = row.score || {};
+    const scores = score.scores || {};
+    const warnings = Array.isArray(metrics.warnings) ? metrics.warnings.join("；") : "";
+    return `
+      <tr>
+        <td>${row.index}</td>
+        <td>${escapeHtml(row.name)}</td>
+        <td>${escapeHtml(row.scenario || "")}</td>
+        <td>${escapeHtml(row.priority || "")}</td>
+        <td>${escapeHtml(row.imageType || metrics.imageType || "unknown")}</td>
+        <td>${escapeHtml(metrics.preset || "")}</td>
+        <td>${escapeHtml(modeLabel(row.mode || ""))}</td>
+        <td>${escapeHtml(modeLabel(score.recommendedMode || ""))}</td>
+        <td>${escapeHtml(metrics.svgMode || "")}</td>
+        <td>${escapeHtml(row.status || "")}</td>
+        <td>${formatMetric(score.average)}</td>
+        <td>${score.pass ? "通过" : "未通过"}</td>
+        <td>${score.releaseBlocker ? "是" : "否"}</td>
+        <td>${formatMetric(scores.matte)}</td>
+        <td>${formatMetric(scores.components)}</td>
+        <td>${formatMetric(scores.svg)}</td>
+        <td>${formatMetric(scores.export)}</td>
+        <td>${row.elements ?? ""}</td>
+        <td>${metrics.smallComponentCount ?? ""}</td>
+        <td>${smallRisk}</td>
+        <td>${formatMetric(metrics.alphaCoverage)}</td>
+        <td>${formatMetric(metrics.edgeJaggednessScore)}</td>
+        <td>${formatMetric(metrics.semiTransparentCoreRatio)}</td>
+        <td>${formatMetric(metrics.lineArtLossRatio)}</td>
+        <td>${formatMetric(metrics.lightRegionLossRatio)}</td>
+        <td>${formatMetric(metrics.whiteFringeRatio)}</td>
+        <td>${metrics.whiteFringePixels ?? ""}</td>
+        <td>${formatMetric(metrics.whiteFringeAreaRatio)}</td>
+        <td>${formatMetric(metrics.lowAlphaWhiteFringeRatio)}</td>
+        <td>${formatMetric(metrics.whiteFringeAverageAlpha)}</td>
+        <td>${risk}</td>
+        <td>${metrics.svgPathCount ?? ""}</td>
+        <td>${metrics.svgCommandCount ?? ""}</td>
+        <td>${formatMetric(metrics.svgCommandDensity)}</td>
+        <td>${formatMetric(metrics.svgGridAlignedRatio)}</td>
+        <td>${svgRisk}</td>
+        <td>${escapeHtml([...score.notes || [], warnings || row.error || ""].filter(Boolean).join("；"))}</td>
+      </tr>`;
+  }).join("");
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>Cutout QA Report</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 24px; color: #111827; }
+    h1 { margin: 0 0 8px; }
+    p { margin: 0 0 20px; color: #667085; }
+    table { border-collapse: collapse; width: 100%; font-size: 13px; }
+    th, td { border: 1px solid #e4e7ec; padding: 8px; text-align: left; vertical-align: top; }
+    th { background: #f8fafc; }
+    tr:nth-child(even) td { background: #fcfcfd; }
+  </style>
+</head>
+<body>
+  <h1>Cutout QA Report</h1>
+  <p>Started: ${escapeHtml(report.startedAt || "")} · Finished: ${escapeHtml(report.finishedAt || "")} · Mode: ${escapeHtml(report.mode || "")} · Split: ${escapeHtml(report.splitStrength || "")}</p>
+  <p>${escapeHtml(report.qaModePolicy || "")}</p>
+  <p>Total: ${summary.total} · Pass: ${summary.pass} · Failed: ${summary.failed} · Avg score: ${formatMetric(summary.averageScore)} · Release blockers: ${summary.releaseBlockers} · Large box risk: ${summary.largeBoxRisk} · Small element risk: ${summary.smallElementRisk} · SVG blocky risk: ${summary.svgBlockyRisk} · Line art risk: ${summary.lineArtRisk} · Light region risk: ${summary.lightRegionRisk} · Semi-transparent core risk: ${summary.semiTransparentRisk}</p>
+  <table>
+    <thead>
+      <tr>
+        <th>#</th><th>图片</th><th>场景</th><th>优先级</th><th>类型</th><th>预设</th><th>识别模式</th><th>推荐模式</th><th>SVG 模式</th><th>状态</th>
+        <th>平均分</th><th>评分</th><th>上线阻塞</th><th>matte</th><th>元素</th><th>SVG</th><th>导出</th>
+        <th>元素数</th><th>小元素数</th><th>小元素风险</th>
+        <th>alphaCoverage</th><th>edgeJaggedness</th><th>semiTransparentCore</th>
+        <th>lineArtLoss</th><th>lightRegionLoss</th><th>whiteFringe</th><th>whiteFringePx</th><th>whiteFringeArea</th><th>lowAlphaFringe</th><th>fringeAvgAlpha</th><th>大框风险</th><th>svgPathCount</th><th>svgCommandCount</th><th>svgCommandDensity</th><th>svgGridAligned</th><th>SVG 块状风险</th><th>提示</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
+</body>
+</html>`;
+}
+
+function summarizeQaReport(report) {
+  const rows = report.rows || [];
+  const summary = rows.reduce((acc, row) => {
+    const metrics = row.metrics || {};
+    const score = row.score || {};
+    acc.total += 1;
+    if (row.status !== "done" || score.pass === false) acc.failed += 1;
+    if (score.pass) acc.pass += 1;
+    if (score.releaseBlocker) acc.releaseBlockers += 1;
+    if (typeof score.average === "number") acc.scoreSum += score.average;
+    if (metrics.largeBoxRisk) acc.largeBoxRisk += 1;
+    if (metrics.smallElementRisk) acc.smallElementRisk += 1;
+    if (metrics.svgBlockyRisk) acc.svgBlockyRisk += 1;
+    if (isIllustrationQualityScenario(row.scenario || "") && (metrics.lineArtLossRatio || 0) > 0.24) acc.lineArtRisk += 1;
+    if (isIllustrationQualityScenario(row.scenario || "") && (metrics.lightRegionLossRatio || 0) > 0.28) acc.lightRegionRisk += 1;
+    if (!isTransparentMaterialScenario(row.scenario || "") && (metrics.semiTransparentCoreRatio || 0) > 0.36) acc.semiTransparentRisk += 1;
+    return acc;
+  }, {
+    total: 0,
+    pass: 0,
+    failed: 0,
+    releaseBlockers: 0,
+    scoreSum: 0,
+    averageScore: 0,
+    largeBoxRisk: 0,
+    smallElementRisk: 0,
+    svgBlockyRisk: 0,
+    lineArtRisk: 0,
+    lightRegionRisk: 0,
+    semiTransparentRisk: 0,
+  });
+  summary.averageScore = summary.total ? roundMetric(summary.scoreSum / summary.total) : 0;
+  return summary;
+}
+
+function formatMetric(value) {
+  return typeof value === "number" ? value.toFixed(4) : "";
 }
 
 async function downloadBatchZip() {
   if (!state.queue.length || state.batchRunning) return;
   state.batchRunning = true;
+  const originalMode = els.detectMode.value;
   const report = {
     startedAt: new Date().toISOString(),
-    mode: els.detectMode.value,
+    mode: originalMode,
+    qaModePolicy: "QA 样本按场景自动使用推荐识别模式；普通图片使用当前识别模式。",
     splitStrength: els.splitStrength.value,
     format: getExportSettings().ext,
     scale: getExportScale(),
@@ -2977,34 +5000,53 @@ async function downloadBatchZip() {
     const total = state.queue.length;
     for (let index = 0; index < state.queue.length; index += 1) {
       const item = state.queue[index];
+      const itemMode = batchModeForItem(item, originalMode);
+      setDetectModeValue(itemMode);
       const row = {
         index: index + 1,
         name: item.originalName,
         isQa: Boolean(item.isQa),
+        scenario: item.qaScenario || "",
+        priority: item.qaPriority || "",
+        needsRealPhoto: Boolean(item.qaNeedsRealPhoto),
+        imageType: item.imageType || "unknown",
+        mode: itemMode,
         startedAt: new Date().toISOString(),
-        reused: item.status === "done" && Boolean(item.cutoutBlob),
+        reused: item.status === "done" && Boolean(item.cutoutBlob) && (
+          item.isQa ? item.processMode === itemMode : (!item.processMode || item.processMode === itemMode)
+        ),
         status: "processing",
         elements: 0,
+        metrics: null,
         sourceSize: item.originalWidth && item.originalHeight ? `${item.originalWidth}x${item.originalHeight}` : "",
         resultSize: item.resultWidth && item.resultHeight ? `${item.resultWidth}x${item.resultHeight}` : "",
         error: "",
+        score: null,
       };
       report.rows.push(row);
-      if (item.status === "done" && item.cutoutBlob) {
+      if (row.reused) {
         row.status = "done";
         row.elements = item.components?.length || 0;
+        row.imageType = item.imageType || "unknown";
+        row.metrics = buildQaMetricsForItem(item);
+        row.score = scoreQaRow(row, item);
         row.resultSize = item.resultWidth && item.resultHeight ? `${item.resultWidth}x${item.resultHeight}` : "";
         continue;
       }
       setProgress(Math.round((index / total) * 100), `${index + 1} / ${total}`);
       await loadItem(item);
+      setDetectModeValue(itemMode);
       await processImage({ message: `批量处理中：${index + 1}/${total} ${item.originalName}` });
       row.status = item.status || "unknown";
       row.elements = item.components?.length || 0;
+      row.imageType = item.imageType || "unknown";
+      row.metrics = buildQaMetricsForItem(item);
       row.sourceSize = item.originalWidth && item.originalHeight ? `${item.originalWidth}x${item.originalHeight}` : "";
       row.resultSize = item.resultWidth && item.resultHeight ? `${item.resultWidth}x${item.resultHeight}` : "";
       row.error = item.error?.message || "";
+      row.score = scoreQaRow(row, item);
     }
+    setDetectModeValue(originalMode);
     setProgress(100, `${total} / ${total}`);
 
     setBusy(true, "正在打包批量 ZIP...");
@@ -3030,24 +5072,31 @@ async function downloadBatchZip() {
     if (!exportedImages) {
       report.status = "failed";
       report.finishedAt = new Date().toISOString();
+      report.summary = summarizeQaReport(report);
       setError("没有可打包的处理结果。");
       return;
     }
 
-    const zipBlob = await zip.generateAsync({ type: "blob" });
-    downloadBlob(zipBlob, `cutout-batch-${formatDateStamp()}.zip`);
     report.exportedImages = exportedImages;
     report.exportedElements = exportedElements;
     report.status = "done";
     report.finishedAt = new Date().toISOString();
+    report.summary = summarizeQaReport(report);
+    zip.file("qa-report.json", JSON.stringify(report, null, 2));
+    zip.file("qa-report.html", generateQaReportHtml(report));
+
+    const zipBlob = await zip.generateAsync({ type: "blob" });
+    downloadBlob(zipBlob, `cutout-batch-${formatDateStamp()}.zip`);
     setStatus(`批量 ZIP 已生成：${exportedImages} 张图片，${exportedElements} 个元素。`);
   } catch (error) {
     report.status = "failed";
     report.finishedAt = new Date().toISOString();
     report.error = error?.message || String(error);
+    report.summary = summarizeQaReport(report);
     console.error(error);
     setError(`批量处理失败：${report.error}`);
   } finally {
+    setDetectModeValue(originalMode);
     state.batchRunning = false;
     setBusy(false);
     updateBatchButton();
@@ -3095,7 +5144,7 @@ function toggleManualMode() {
   els.manualModeBtn.textContent = state.manual ? "关闭框选" : "开启框选";
   els.overlayCanvas.closest(".checker").classList.toggle("manual", state.manual);
   state.selection = null;
-  els.exportSelectionBtn.disabled = true;
+  updateManualSelectionActions();
   updateManualPreview();
   drawOverlay();
   updateUiState();
@@ -3107,6 +5156,7 @@ function startSelection(event) {
   const point = eventToCanvasPoint(event);
   state.dragStart = point;
   state.selection = { x: point.x, y: point.y, width: 0, height: 0 };
+  updateManualSelectionActions();
   updateManualPreview();
   drawOverlay();
 }
@@ -3115,7 +5165,7 @@ function moveSelection(event) {
   if (!state.dragStart || !state.manual) return;
   const point = eventToCanvasPoint(event);
   state.selection = applyAspectLock(normalizeBox(state.dragStart, point));
-  els.exportSelectionBtn.disabled = state.selection.width < 4 || state.selection.height < 4;
+  updateManualSelectionActions();
   updateManualPreview();
   drawOverlay();
 }
@@ -3148,6 +5198,7 @@ function updateManualPreview() {
     els.manualReadout.textContent = "当前框选：未选择";
     els.manualPreviewCanvas.width = 0;
     els.manualPreviewCanvas.height = 0;
+    updateManualSelectionActions();
     return;
   }
   const box = {
@@ -3169,6 +5220,15 @@ function updateManualPreview() {
   ctx.drawImage(preview, 0, 0, els.manualPreviewCanvas.width, els.manualPreviewCanvas.height);
   const size = getExportSize(box);
   els.manualReadout.textContent = `当前框选：${box.width} x ${box.height}；${scale}x 导出：${size.width} x ${size.height}`;
+  updateManualSelectionActions();
+}
+
+function updateManualSelectionActions() {
+  const valid = Boolean(state.manual && state.selection && state.selection.width >= 4 && state.selection.height >= 4);
+  const selectedCount = state.selectedComponentIds.size;
+  els.exportSelectionBtn.disabled = !valid;
+  els.addSelectionBtn.disabled = !valid || state.processing;
+  els.applySelectionBtn.disabled = !valid || state.processing || selectedCount !== 1;
 }
 
 function applyAspectLock(box) {
@@ -3193,7 +5253,7 @@ function handleSelectionKeys(event) {
   event.preventDefault();
   if (event.key === "Escape") {
     state.selection = null;
-    els.exportSelectionBtn.disabled = true;
+    updateManualSelectionActions();
   } else if (event.key === "ArrowUp") state.selection.y = Math.max(0, state.selection.y - step);
   else if (event.key === "ArrowDown") state.selection.y = Math.min(els.overlayCanvas.height - state.selection.height, state.selection.y + step);
   else if (event.key === "ArrowLeft") state.selection.x = Math.max(0, state.selection.x - step);
@@ -3301,6 +5361,7 @@ function setBusy(isBusy, message) {
   els.downloadZipBtn.disabled = isBusy || !state.components.length;
   updateBatchButton();
   updateSelectionButtons();
+  updateManualSelectionActions();
   updateUiState();
 }
 
@@ -3426,11 +5487,12 @@ function canvasToExportBlob(canvas) {
 }
 
 function canvasToVectorSvgBlob(canvas) {
-  const source = prepareVectorCanvas(canvas);
+  const vectorSettings = getVectorSettings();
+  const source = prepareVectorCanvas(canvas, vectorSettings.maxEdge);
   const ctx = source.getContext("2d", { willReadFrequently: true });
   const imageData = ctx.getImageData(0, 0, source.width, source.height);
-  const alphaThreshold = Math.max(8, Number(els.cleanup.value) || 24);
-  const groups = imageDataToVectorRegions(imageData, alphaThreshold);
+  const alphaThreshold = Math.max(8, Number(vectorSettings.alphaThreshold) || Number(els.cleanup.value) || 24);
+  const groups = imageDataToVectorRegions(imageData, alphaThreshold, vectorSettings);
   const paths = [...groups.entries()]
     .sort((a, b) => b[1].area - a[1].area)
     .map(([key, group]) => {
@@ -3449,8 +5511,59 @@ function canvasToVectorSvgBlob(canvas) {
   return new Blob([svg], { type: "image/svg+xml" });
 }
 
-function prepareVectorCanvas(canvas) {
-  const maxVectorEdge = 900;
+function getVectorSettings() {
+  const preset = getAlgorithmPreset(state.currentItem?.imageType || state.imageType || "unknown");
+  const svg = getPresetConfig(preset).svg;
+  const selectedMode = els.svgMode?.value || "auto";
+  const mode = selectedMode === "auto" ? (svg.mode || "auto") : selectedMode;
+  const manual = selectedMode !== "auto";
+  const colors = clamp(Number(els.svgColors?.value) || 48, 8, 96);
+  const smooth = clamp(Number(els.svgSmooth?.value) || 2, 0, 4);
+  const detail = clamp(Number(els.svgDetail?.value) || 3, 1, 5);
+  const speckle = clamp(Number(els.svgSpeckle?.value) || 2, 0, 5);
+  const detailFactor = 1 + (detail - 3) * 0.18;
+  const speckleFactor = 1 + (speckle - 2) * 0.35;
+  const modeFactor = mode === "fast" ? 1.35 : mode === "precise" ? 0.72 : 1;
+  const colorStep = manual
+    ? clamp(Math.round(256 / Math.max(4, colors) * (mode === "fast" ? 1.25 : 1)), 4, 48)
+    : svg.colorStep;
+  return {
+    preset,
+    selectedMode,
+    mode,
+    colorStep,
+    maxEdge: manual
+      ? (mode === "fast" ? 760 : 1180)
+      : svg.maxEdge,
+    minRegionRatio: manual
+      ? clamp(0.000012 * speckleFactor / detailFactor * modeFactor, 0.000003, 0.00008)
+      : svg.minRegionRatio,
+    mergeTinyRatio: manual
+      ? clamp(0.00003 * speckleFactor / detailFactor * modeFactor, 0.000005, 0.00012)
+      : svg.mergeTinyRatio,
+    simplify: manual
+      ? clamp((4.6 - smooth) * 0.42 * modeFactor / detailFactor, 0.45, 2.8)
+      : svg.simplify,
+    smoothPasses: manual
+      ? Math.max(0, Math.min(3, Math.round(smooth)))
+      : svg.smoothPasses,
+    alphaThreshold: manual
+      ? (mode === "precise" ? 24 : 48)
+      : (svg.alphaThreshold || 32),
+    protectLineArt: (Boolean(svg.protectLineArt) || Boolean(els.svgLineArt?.checked)) && (
+      preset === "logoIcon" || preset === "illustration" || preset === "sticker" || preset === "multiSticker" || manual
+    ),
+    flattenAlpha: (
+      preset === "logoIcon" ||
+      preset === "illustration" ||
+      preset === "sticker" ||
+      preset === "multiSticker" ||
+      (manual && mode === "precise")
+    ),
+  };
+}
+
+function prepareVectorCanvas(canvas, maxVectorEdge = 900) {
   const scale = Math.min(1, maxVectorEdge / Math.max(canvas.width, canvas.height));
   if (scale >= 1) return canvas;
   const vectorCanvas = document.createElement("canvas");
@@ -3463,20 +5576,47 @@ function prepareVectorCanvas(canvas) {
   return vectorCanvas;
 }
 
-function imageDataToVectorRegions(imageData, alphaThreshold) {
+function imageDataToVectorRegions(imageData, alphaThreshold, vectorSettings = getVectorSettings()) {
   const { width, height, data } = imageData;
   const groups = new Map();
-  const colorStep = 32;
+  const colorStep = vectorSettings.colorStep || 32;
   const keys = new Array(width * height);
-  const visited = new Uint8Array(width * height);
-  const stack = [];
-  const minRegionArea = Math.max(5, Math.round((width * height) * 0.000008));
+  const minRegionArea = Math.max(5, Math.round((width * height) * (vectorSettings.minRegionRatio || 0.000012)));
+  const mergeTinyArea = Math.max(4, Math.round((width * height) * (vectorSettings.mergeTinyRatio || 0.00003)));
 
   for (let index = 0; index < keys.length; index += 1) {
     const offset = index * 4;
     if (data[offset + 3] <= alphaThreshold) continue;
-    keys[index] = vectorColorKey(data[offset], data[offset + 1], data[offset + 2], data[offset + 3], colorStep);
+    keys[index] = vectorColorKey(data[offset], data[offset + 1], data[offset + 2], data[offset + 3], colorStep, vectorSettings);
   }
+
+  stabilizeVectorColorKeys(keys, width, height, vectorSettings);
+
+  const firstPass = collectVectorRegions(keys, width, height);
+  for (const region of firstPass) {
+    if (region.pixels.length < mergeTinyArea) {
+      const replacement = nearestNeighborVectorKey(region.pixels, keys, width, height, region.key);
+      if (replacement) {
+        for (const pixel of region.pixels) keys[pixel] = replacement;
+      }
+    }
+  }
+
+  stabilizeVectorColorKeys(keys, width, height, vectorSettings);
+
+  const finalRegions = collectVectorRegions(keys, width, height);
+  for (const region of finalRegions) {
+    if (region.pixels.length < minRegionArea) continue;
+    appendVectorRegion(groups, region.key, region.pixels, keys, width, height, vectorSettings);
+  }
+
+  return groups;
+}
+
+function collectVectorRegions(keys, width, height) {
+  const visited = new Uint8Array(keys.length);
+  const stack = [];
+  const regions = [];
 
   for (let index = 0; index < keys.length; index += 1) {
     const key = keys[index];
@@ -3504,32 +5644,101 @@ function imageDataToVectorRegions(imageData, alphaThreshold) {
       }
     }
 
-    if (pixels.length < minRegionArea) continue;
-    appendVectorRegion(groups, key, pixels, keys, width, height);
+    regions.push({ key, pixels });
   }
 
-  return groups;
+  return regions;
 }
 
-function vectorColorKey(red, green, blue, alpha, step) {
-  const r = quantizeChannel(red, step);
-  const g = quantizeChannel(green, step);
-  const b = quantizeChannel(blue, step);
-  const opacity = alpha >= 248 ? "1" : (Math.round((alpha / 255) * 10) / 10).toFixed(1);
+function vectorColorKey(red, green, blue, alpha, step, vectorSettings = {}) {
+  const metrics = colorMetrics(red, green, blue);
+  const lineArt = vectorSettings.protectLineArt && metrics.lightness < 86;
+  const localStep = lineArt ? Math.max(8, Math.round(step * 0.55)) : step;
+  const r = quantizeChannel(red, localStep);
+  const g = quantizeChannel(green, localStep);
+  const b = quantizeChannel(blue, localStep);
+  const opacity = vectorSettings.flattenAlpha || alpha >= 248 ? "1" : (Math.round((alpha / 255) * 10) / 10).toFixed(1);
   return `${rgbToHex(r, g, b)}|${opacity}`;
 }
 
-function appendVectorRegion(groups, key, pixels, keys, width, height) {
+function stabilizeVectorColorKeys(keys, width, height, vectorSettings = {}) {
+  const passes = vectorSettings.mode === "precise" ? 2 : 1;
+  let current = keys;
+  for (let pass = 0; pass < passes; pass += 1) {
+    const next = current.slice();
+    for (let y = 1; y < height - 1; y += 1) {
+      for (let x = 1; x < width - 1; x += 1) {
+        const index = y * width + x;
+        const key = current[index];
+        if (!key) continue;
+        const darkKey = isDarkVectorKey(key);
+        const counts = new Map();
+        let ownCount = 0;
+        for (let yy = y - 1; yy <= y + 1; yy += 1) {
+          for (let xx = x - 1; xx <= x + 1; xx += 1) {
+            if (xx === x && yy === y) continue;
+            const neighbor = current[yy * width + xx];
+            if (!neighbor) continue;
+            if (neighbor === key) ownCount += 1;
+            counts.set(neighbor, (counts.get(neighbor) || 0) + 1);
+          }
+        }
+        const [dominantKey, dominantCount] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0] || [];
+        if (!dominantKey || dominantKey === key) continue;
+        if (darkKey && vectorSettings.protectLineArt && ownCount >= 1) continue;
+        if (ownCount <= 1 && dominantCount >= (darkKey ? 6 : 5)) next[index] = dominantKey;
+      }
+    }
+    current = next;
+  }
+  for (let index = 0; index < keys.length; index += 1) keys[index] = current[index];
+}
+
+function isDarkVectorKey(key = "") {
+  const hex = key.split("|")[0] || "";
+  if (!/^#[0-9a-f]{6}$/i.test(hex)) return false;
+  const red = parseInt(hex.slice(1, 3), 16);
+  const green = parseInt(hex.slice(3, 5), 16);
+  const blue = parseInt(hex.slice(5, 7), 16);
+  return colorMetrics(red, green, blue).lightness < 96;
+}
+
+function nearestNeighborVectorKey(pixels, keys, width, height, ownKey) {
+  const counts = new Map();
+  for (const index of pixels) {
+    const x = index % width;
+    const neighbors = [
+      x > 0 ? index - 1 : -1,
+      x < width - 1 ? index + 1 : -1,
+      index >= width ? index - width : -1,
+      index < keys.length - width ? index + width : -1,
+    ];
+    for (const next of neighbors) {
+      const key = next >= 0 ? keys[next] : null;
+      if (!key || key === ownKey) continue;
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+}
+
+function appendVectorRegion(groups, key, pixels, keys, width, height, vectorSettings = getVectorSettings()) {
   let group = groups.get(key);
   if (!group) {
-    group = { path: "", area: 0 };
+    group = { path: "", area: 0, regionCount: 0 };
     groups.set(key, group);
   }
   const loops = traceRegionLoops(pixels, keys, key, width, height);
-  const path = loops.map((loop) => loopToPath(loop)).join("");
+  const path = loops
+    .map((loop) => loopToPath(
+      smoothVectorLoop(simplifyVectorLoop(loop, vectorSettings.simplify || 1.4), vectorSettings.smoothPasses ?? 2),
+      vectorSettings,
+    ))
+    .join("");
   if (!path) return;
   group.path += path;
   group.area += pixels.length;
+  group.regionCount += loops.length;
 }
 
 function traceRegionLoops(pixels, keys, key, width, height) {
@@ -3603,15 +5812,197 @@ function simplifyOrthogonalLoop(points) {
   return simplified;
 }
 
-function loopToPath(loop) {
+function loopToPath(loop, vectorSettings = {}) {
   if (loop.length < 4) return "";
+  if (vectorSettings.mode === "precise" && loop.length > 8) return loopToCubicPath(loop, vectorSettings);
   const start = loop[0];
   let d = `M${start[0]} ${start[1]}`;
-  for (let index = 1; index < loop.length - 1; index += 1) {
-    const point = loop[index];
-    d += `L${point[0]} ${point[1]}`;
+  if (loop.length > 10) {
+    for (let index = 1; index < loop.length - 2; index += 1) {
+      const point = loop[index];
+      const next = loop[index + 1];
+      const midX = roundPathNumber((point[0] + next[0]) / 2);
+      const midY = roundPathNumber((point[1] + next[1]) / 2);
+      d += `Q${roundPathNumber(point[0])} ${roundPathNumber(point[1])} ${midX} ${midY}`;
+    }
+  } else {
+    for (let index = 1; index < loop.length - 1; index += 1) {
+      const point = loop[index];
+      d += `L${roundPathNumber(point[0])} ${roundPathNumber(point[1])}`;
+    }
   }
   return `${d}Z`;
+}
+
+function loopToCubicPath(loop, vectorSettings = {}) {
+  const closed = sameVectorPoint(loop[0], loop[loop.length - 1]);
+  let points = closed ? loop.slice(0, -1) : loop;
+  if (points.length < 4) return loopToPath(loop, { mode: "fast" });
+  points = relaxVectorOutline(points, vectorSettings);
+  const simplify = clamp((vectorSettings.simplify || 1.2) * 1.15, 0.75, 2.6);
+  if (points.length > 18) {
+    const simplified = rdpSimplify([...points, points[0]], simplify);
+    points = sameVectorPoint(simplified[0], simplified[simplified.length - 1]) ? simplified.slice(0, -1) : simplified;
+  }
+  points = chaikinClosedPoints(points, vectorSettings.protectLineArt ? 1 : 2);
+  points = reduceClosePoints(points, vectorSettings.protectLineArt ? 0.72 : 0.95);
+  if (points.length < 4) return loopToPath(loop, { mode: "fast" });
+  let d = `M${roundPathNumber(points[0][0])} ${roundPathNumber(points[0][1])}`;
+  const tension = vectorSettings.protectLineArt ? 0.42 : 0.5;
+  for (let index = 0; index < points.length; index += 1) {
+    const p0 = points[(index - 1 + points.length) % points.length];
+    const p1 = points[index];
+    const p2 = points[(index + 1) % points.length];
+    const p3 = points[(index + 2) % points.length];
+    const cp1 = [
+      p1[0] + ((p2[0] - p0[0]) * tension) / 6,
+      p1[1] + ((p2[1] - p0[1]) * tension) / 6,
+    ];
+    const cp2 = [
+      p2[0] - ((p3[0] - p1[0]) * tension) / 6,
+      p2[1] - ((p3[1] - p1[1]) * tension) / 6,
+    ];
+    d += `C${roundPathNumber(cp1[0])} ${roundPathNumber(cp1[1])} ${roundPathNumber(cp2[0])} ${roundPathNumber(cp2[1])} ${roundPathNumber(p2[0])} ${roundPathNumber(p2[1])}`;
+  }
+  return `${d}Z`;
+}
+
+function relaxVectorOutline(points, vectorSettings = {}) {
+  if (points.length < 8 || vectorSettings.mode !== "precise") return points;
+  const passes = vectorSettings.protectLineArt ? 1 : 2;
+  const strength = vectorSettings.protectLineArt ? 0.14 : 0.22;
+  let output = points;
+  for (let pass = 0; pass < passes; pass += 1) {
+    output = output.map((point, index) => {
+      const prev = output[(index - 1 + output.length) % output.length];
+      const next = output[(index + 1) % output.length];
+      const prevDistance = Math.hypot(point[0] - prev[0], point[1] - prev[1]);
+      const nextDistance = Math.hypot(point[0] - next[0], point[1] - next[1]);
+      if (prevDistance > 18 || nextDistance > 18) return point;
+      const average = [(prev[0] + next[0]) / 2, (prev[1] + next[1]) / 2];
+      const corner = Math.abs((point[0] - prev[0]) * (next[1] - point[1]) - (point[1] - prev[1]) * (next[0] - point[0]));
+      const localStrength = corner > 8 && vectorSettings.protectLineArt ? strength * 0.55 : strength;
+      return [
+        point[0] * (1 - localStrength) + average[0] * localStrength,
+        point[1] * (1 - localStrength) + average[1] * localStrength,
+      ];
+    });
+  }
+  return output;
+}
+
+function chaikinClosedPoints(points, passes = 1) {
+  if (points.length < 4 || passes <= 0) return points;
+  let output = points;
+  for (let pass = 0; pass < Math.min(2, passes); pass += 1) {
+    const next = [];
+    for (let index = 0; index < output.length; index += 1) {
+      const current = output[index];
+      const after = output[(index + 1) % output.length];
+      const distance = Math.hypot(after[0] - current[0], after[1] - current[1]);
+      if (distance < 1.1) {
+        next.push(current);
+        continue;
+      }
+      next.push([
+        current[0] * 0.72 + after[0] * 0.28,
+        current[1] * 0.72 + after[1] * 0.28,
+      ]);
+      next.push([
+        current[0] * 0.28 + after[0] * 0.72,
+        current[1] * 0.28 + after[1] * 0.72,
+      ]);
+    }
+    output = next;
+  }
+  return output;
+}
+
+function smoothVectorLoop(loop, passes = 2) {
+  if (loop.length < 12) return loop;
+  const closed = sameVectorPoint(loop[0], loop[loop.length - 1]);
+  const source = closed ? loop.slice(0, -1) : loop;
+  const minSegment = 1.2;
+  let points = source;
+  for (let pass = 0; pass < Math.max(0, Math.min(3, passes)); pass += 1) {
+    const next = [];
+    for (let index = 0; index < points.length; index += 1) {
+      const current = points[index];
+      const after = points[(index + 1) % points.length];
+      const distance = Math.hypot(after[0] - current[0], after[1] - current[1]);
+      if (distance < minSegment) {
+        next.push(current);
+        continue;
+      }
+      next.push([
+        current[0] * 0.75 + after[0] * 0.25,
+        current[1] * 0.75 + after[1] * 0.25,
+      ]);
+      next.push([
+        current[0] * 0.25 + after[0] * 0.75,
+        current[1] * 0.25 + after[1] * 0.75,
+      ]);
+    }
+    points = next;
+  }
+  points.push(points[0]);
+  return points;
+}
+
+function simplifyVectorLoop(loop, epsilon = 1.2) {
+  if (loop.length < 16) return loop;
+  const closed = sameVectorPoint(loop[0], loop[loop.length - 1]);
+  const source = closed ? loop.slice(0, -1) : loop;
+  const reduced = reduceClosePoints(source, 1.05);
+  if (reduced.length < 8) return loop;
+  const anchor = 0;
+  const linear = [...reduced.slice(anchor), ...reduced.slice(0, anchor), reduced[anchor]];
+  const simplified = rdpSimplify(linear, epsilon);
+  if (simplified.length < 4) return loop;
+  if (!sameVectorPoint(simplified[0], simplified[simplified.length - 1])) simplified.push(simplified[0]);
+  return simplified;
+}
+
+function reduceClosePoints(points, minDistance) {
+  const output = [];
+  for (const point of points) {
+    const last = output[output.length - 1];
+    if (!last || Math.hypot(point[0] - last[0], point[1] - last[1]) >= minDistance) output.push(point);
+  }
+  if (output.length > 2 && Math.hypot(output[0][0] - output[output.length - 1][0], output[0][1] - output[output.length - 1][1]) < minDistance) {
+    output.pop();
+  }
+  return output;
+}
+
+function rdpSimplify(points, epsilon) {
+  if (points.length <= 3) return points;
+  let maxDistance = 0;
+  let index = 0;
+  const start = points[0];
+  const end = points[points.length - 1];
+  for (let i = 1; i < points.length - 1; i += 1) {
+    const distance = perpendicularDistance(points[i], start, end);
+    if (distance > maxDistance) {
+      maxDistance = distance;
+      index = i;
+    }
+  }
+  if (maxDistance <= epsilon) return [start, end];
+  const left = rdpSimplify(points.slice(0, index + 1), epsilon);
+  const right = rdpSimplify(points.slice(index), epsilon);
+  return left.slice(0, -1).concat(right);
+}
+
+function perpendicularDistance(point, start, end) {
+  const dx = end[0] - start[0];
+  const dy = end[1] - start[1];
+  if (dx === 0 && dy === 0) return Math.hypot(point[0] - start[0], point[1] - start[1]);
+  return Math.abs(dy * point[0] - dx * point[1] + end[0] * start[1] - end[1] * start[0]) / Math.hypot(dx, dy);
+}
+
+function roundPathNumber(value) {
+  return Math.round(value * 10) / 10;
 }
 
 function sameVectorPoint(a, b) {
