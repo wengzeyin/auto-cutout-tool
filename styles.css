@@ -58,6 +58,17 @@ button,
     opacity 0.16s ease;
 }
 
+.icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 button:not(:disabled):hover,
 .primary:hover {
   border-color: var(--line-strong);
@@ -1121,10 +1132,19 @@ canvas {
   gap: 6px;
   color: var(--muted);
   text-align: center;
+  padding: 22px;
+  background:
+    linear-gradient(135deg, rgba(52, 199, 134, 0.08), transparent 42%),
+    #ffffff;
 }
 
 .empty-elements strong {
   color: var(--ink);
+}
+
+.empty-elements span {
+  max-width: 560px;
+  line-height: 1.5;
 }
 
 .fragment-warning {
@@ -1149,6 +1169,10 @@ canvas {
     border-color 0.16s ease,
     box-shadow 0.16s ease,
     transform 0.16s ease;
+}
+
+.element-card:hover {
+  transform: translateY(-1px);
 }
 
 .element-card:hover,
@@ -1293,6 +1317,23 @@ canvas {
 @media (hover: none) {
   .asset-actions {
     opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+  }
+
+  button:not(:disabled):active,
+  .primary:active,
+  .element-card:hover {
+    transform: none;
   }
 }
 

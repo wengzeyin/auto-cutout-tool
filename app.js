@@ -134,12 +134,51 @@ const sourceCtx = els.sourceCanvas.getContext("2d", { willReadFrequently: true }
 const resultCtx = els.resultCanvas.getContext("2d", { willReadFrequently: true });
 const overlayCtx = els.overlayCanvas.getContext("2d");
 
+const ICON_PATHS = {
+  add: ["M12 5v14", "M5 12h14"],
+  adjust: ["M4 8h10", "M18 8h2", "M8 16h12", "M4 16h2", "M14 6v4", "M6 14v4"],
+  box: ["M4 4h16v16H4z", "M8 8h8v8H8z"],
+  check: ["M5 12l4 4L19 6"],
+  copy: ["M8 8h10v10H8z", "M6 14H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v1"],
+  download: ["M12 3v12", "M7 10l5 5 5-5", "M5 21h14"],
+  merge: ["M8 7h8", "M8 17h8", "M4 12h16", "M8 7l-4 5 4 5", "M16 7l4 5-4 5"],
+  play: ["M8 5v14l11-7z"],
+  sample: ["M5 5h14v14H5z", "M8 15l3-4 2 3 2-2 3 3"],
+  scissors: ["M4 7l16 10", "M4 17L20 7", "M5 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4", "M5 20a2 2 0 1 0 0-4 2 2 0 0 0 0 4"],
+  trash: ["M4 7h16", "M10 11v6", "M14 11v6", "M6 7l1 13h10l1-13", "M9 7V4h6v3"],
+  upload: ["M12 21V9", "M7 14l5-5 5 5", "M5 4h14"],
+  zip: ["M6 4h9l3 3v13H6z", "M14 4v4h4", "M9 8h2", "M9 12h2", "M9 16h2"],
+};
+
+const BUTTON_ICONS = {
+  sampleBtn: "sample",
+  qaSampleBtn: "sample",
+  heroSampleBtn: "sample",
+  processBtn: "play",
+  rescanBtn: "sample",
+  copyCutoutBtn: "copy",
+  downloadCutoutBtn: "download",
+  downloadZipBtn: "zip",
+  downloadSelectedZipBtn: "zip",
+  downloadBatchZipBtn: "zip",
+  selectAllBtn: "check",
+  clearSelectionBtn: "check",
+  splitSelectedBtn: "scissors",
+  mergeSelectedBtn: "merge",
+  manualModeBtn: "box",
+  exportSelectionBtn: "download",
+  addSelectionBtn: "add",
+  applySelectionBtn: "adjust",
+  mobilePrimaryBtn: "play",
+};
+
 syncOutputs();
 bindEvents();
 updateDownloadLabels();
 syncFormatSegments();
 setPreviewBackground("checker");
 setPreviewMode(state.previewMode);
+decorateStaticIcons();
 updateUiState();
 renderQueue();
 
@@ -260,6 +299,37 @@ function updateDisabledHints() {
       button.removeAttribute("title");
       button.removeAttribute("aria-label");
     }
+  }
+}
+
+function createIcon(name) {
+  const paths = ICON_PATHS[name];
+  if (!paths) return null;
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "icon");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  for (const pathData of paths) {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", pathData);
+    svg.append(path);
+  }
+  return svg;
+}
+
+function decorateIconButton(button, iconName) {
+  if (!button || button.querySelector(":scope > .icon")) return;
+  const icon = createIcon(iconName);
+  if (icon) button.prepend(icon);
+}
+
+function decorateStaticIcons() {
+  for (const [id, iconName] of Object.entries(BUTTON_ICONS)) {
+    decorateIconButton(document.getElementById(id), iconName);
+  }
+  for (const label of document.querySelectorAll(".primary")) {
+    if (label.querySelector("input[type='file']")) decorateIconButton(label, "upload");
   }
 }
 
@@ -881,6 +951,7 @@ function updateDownloadLabels() {
     button.textContent = `下载 ${label}`;
   }
   updateSelectionButtons();
+  decorateStaticIcons();
 }
 
 async function loadItem(item) {
@@ -4539,24 +4610,28 @@ function renderCards() {
     button.className = "ghost";
     button.dataset.downloadElement = "true";
     button.textContent = `下载 ${getExportSettings().label}`;
+    decorateIconButton(button, "download");
     button.addEventListener("click", () => downloadComponent(component));
 
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "ghost danger-lite";
     remove.textContent = "删除";
+    decorateIconButton(remove, "trash");
     remove.addEventListener("click", () => removeComponent(component.id));
 
     const split = document.createElement("button");
     split.type = "button";
     split.className = "ghost";
     split.textContent = "拆分";
+    decorateIconButton(split, "scissors");
     split.addEventListener("click", () => splitComponentById(component.id));
 
     const adjust = document.createElement("button");
     adjust.type = "button";
     adjust.className = "ghost";
     adjust.textContent = "调整";
+    decorateIconButton(adjust, "adjust");
     adjust.addEventListener("click", () => loadComponentIntoManualSelection(component.id));
 
     const actions = document.createElement("div");
