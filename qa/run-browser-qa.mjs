@@ -33,7 +33,7 @@ try {
   page.on("console", (message) => consoleMessages.push(`${message.type()}: ${message.text()}`));
   page.on("pageerror", (error) => consoleMessages.push(`pageerror: ${error.message}`));
 
-  await page.goto(baseUrl, { waitUntil: "networkidle", timeout: 60_000 });
+  await gotoQaPage(page);
   await page.locator("#qaSampleBtn").click({ timeout: 30_000 });
   await page.waitForFunction(() => window.__cutoutDebug?.queueLength?.() >= 15 || document.querySelectorAll(".queue-item").length >= 15, null, { timeout: 60_000 }).catch(async () => {
     const queueCount = await page.locator(".queue-item").count().catch(() => 0);
@@ -106,6 +106,21 @@ function requireFromNodePath(name) {
   } catch {
     return require(path.join(nodeModules, name));
   }
+}
+
+async function gotoQaPage(page) {
+  let lastError;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      await page.goto(baseUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
+      await page.locator("#qaSampleBtn").waitFor({ state: "visible", timeout: 30_000 });
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 2) await page.waitForTimeout(1000);
+    }
+  }
+  throw lastError;
 }
 
 function startServer() {

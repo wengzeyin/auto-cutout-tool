@@ -1,6 +1,6 @@
 # QA Run Summary
 
-Run time: 2026-07-09 15:10 Asia/Shanghai
+Run time: 2026-07-09 15:24 Asia/Shanghai
 
 Mode: mixed QA scenarios
 Export format: PNG / WebP / SVG validation
@@ -19,7 +19,7 @@ Export scale: 1x baseline with size checks
 - Line art risk: 0
 - Light region risk: 0
 - Semi-transparent core risk: 0
-- ZIP: `qa/run-output/cutout-batch-20260709-1510.zip`
+- ZIP: `qa/run-output/cutout-batch-20260709-1524.zip`
 - Raw report: `qa/run-output/qa-report.latest.json`
 
 ## Per Image Metrics
@@ -45,11 +45,10 @@ Export scale: 1x baseline with size checks
 ## Findings
 
 - Full 15-image QA regression passed with average score 4.7883.
-- Added a stricter low-alpha white-fringe cleanup for illustration/sticker/line-art mattes. It clears only near-white pixels that are low alpha, adjacent to transparency, near colored opaque subject pixels, and not adjacent to protected light details.
-- Synthetic matte coverage now verifies low-alpha sticker fringe is cleared from 18 alpha to 0 while nearby interior white detail remains at 18 alpha.
-- Real QA white-fringe ratio improved on design assets: sticker pack 0.0214 -> 0.0063, small details 0.0709 -> 0.0589, illustration icons 0.0099 -> 0.0042.
-- Latest browser QA reports no large-box, small-element, SVG blocky, line-art, light-region, or semi-transparent core release risks.
-- `13-small-details.png` still has overall average 4.55; remaining limitation is matte edge/semi-core quality, not element splitting.
+- Browser QA runner now waits for DOM readiness and the QA sample button instead of `networkidle`, reducing false failures from long-running model/CDN/cache network activity.
+- Runner navigation retries once before failing, which addresses transient page-load hiccups seen during regression runs.
+- The QA report still shows no large-box, small-element, SVG blocky, line-art, light-region, or semi-transparent core release risks.
+- Current algorithmic limiting cases remain: photo-like semi-transparent core on curly/short fur and complex-background person, product edge jaggedness, and small-detail sticker matte edge quality.
 
 ## Not Covered
 
