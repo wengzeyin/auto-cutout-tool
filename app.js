@@ -4,9 +4,11 @@ import JSZip from "https://esm.sh/jszip@3.10.1";
 const els = {
   appRoot: document.querySelector("#appRoot"),
   fileInput: document.querySelector("#fileInput"),
+  heroFileInput: document.querySelector("#heroFileInput"),
   dropZone: document.querySelector("#dropZone"),
   uploadFeedback: document.querySelector("#uploadFeedback"),
   sampleBtn: document.querySelector("#sampleBtn"),
+  heroSampleBtn: document.querySelector("#heroSampleBtn"),
   qaSampleBtn: document.querySelector("#qaSampleBtn"),
   sourceCanvas: document.querySelector("#sourceCanvas"),
   resultCanvas: document.querySelector("#resultCanvas"),
@@ -209,7 +211,13 @@ function bindEvents() {
     els.fileInput.value = "";
   });
 
+  els.heroFileInput?.addEventListener("change", () => {
+    addFiles([...els.heroFileInput.files], "选择");
+    els.heroFileInput.value = "";
+  });
+
   els.sampleBtn.addEventListener("click", loadSample);
+  els.heroSampleBtn?.addEventListener("click", loadSample);
   els.qaSampleBtn.addEventListener("click", loadQaSamples);
   els.processBtn.addEventListener("click", processImage);
   els.cancelBtn.addEventListener("click", cancelProcessing);
@@ -760,7 +768,7 @@ function analyzeSourceImageType(sourceCanvas) {
   return "photo";
 }
 
-function updateDownloadLabels() {
+function updateDownloadLabelsLegacy() {
   const { ext, label } = getExportSettings();
   els.copyCutoutBtn.textContent = "复制 PNG";
   els.downloadCutoutBtn.textContent = `下载整张抠图 ${label}`;
@@ -770,6 +778,21 @@ function updateDownloadLabels() {
     ext === "svg"
       ? "SVG 将导出为矢量路径，适合 logo、贴纸和扁平插画；照片会被近似成大量色块路径。"
       : "处理完成后可导出 PNG / WebP / SVG。";
+  for (const button of els.elementGrid.querySelectorAll("[data-download-element]")) {
+    button.textContent = `下载 ${label}`;
+  }
+  updateSelectionButtons();
+}
+
+function updateDownloadLabels() {
+  const { ext, label } = getExportSettings();
+  els.copyCutoutBtn.textContent = "复制 PNG";
+  els.downloadCutoutBtn.textContent = `下载 ${label}`;
+  els.downloadZipBtn.textContent = "下载全部 ZIP";
+  els.downloadBatchZipBtn.textContent = "批量处理并下载 ZIP";
+  els.exportHint.textContent = ext === "svg"
+    ? "SVG 会导出为可编辑矢量路径，适合 logo、贴纸和扁平插画；照片会近似成色块路径。"
+    : "处理完成后可导出 PNG / WebP / SVG。";
   for (const button of els.elementGrid.querySelectorAll("[data-download-element]")) {
     button.textContent = `下载 ${label}`;
   }
@@ -958,7 +981,7 @@ function resetSourceCanvas() {
   els.sourceCanvas.height = 0;
 }
 
-function renderQueue() {
+function renderQueueLegacy() {
   els.queueCount.textContent = `${state.queue.length} 张`;
   els.queueList.innerHTML = "";
 
@@ -976,6 +999,37 @@ function renderQueue() {
     row.innerHTML = `
       <button type="button" class="queue-select">
         <img class="queue-preview" src="${item.previewUrl}" alt="" />
+        <span class="queue-copy">
+          <strong>${escapeHtml(item.originalName)}</strong>
+          <span>${escapeHtml(item.message || "待处理")}</span>
+        </span>
+      </button>
+      <button type="button" class="queue-delete" title="删除" aria-label="删除 ${escapeHtml(item.originalName)}">×</button>
+    `;
+    row.querySelector(".queue-select").addEventListener("click", () => loadItem(item));
+    row.querySelector(".queue-delete").addEventListener("click", () => removeQueueItem(item));
+    els.queueList.append(row);
+  }
+}
+
+function renderQueue() {
+  els.queueCount.textContent = `${state.queue.length} 张`;
+  els.queueList.innerHTML = "";
+
+  if (!state.queue.length) {
+    const empty = document.createElement("div");
+    empty.className = "queue-empty";
+    empty.textContent = "还没有图片。";
+    els.queueList.append(empty);
+    return;
+  }
+
+  for (const item of state.queue) {
+    const row = document.createElement("div");
+    row.className = `queue-item ${item.status || "ready"}${item === state.currentItem ? " active" : ""}`;
+    row.innerHTML = `
+      <button type="button" class="queue-select">
+        <img class="queue-preview" src="${item.previewUrl}" alt="" loading="lazy" />
         <span class="queue-copy">
           <strong>${escapeHtml(item.originalName)}</strong>
           <span>${escapeHtml(item.message || "待处理")}</span>
@@ -5513,6 +5567,49 @@ function drawCanvasToPreview(sourceCanvas, canvas, ctx) {
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
   ctx.drawImage(sourceCanvas, 0, 0, canvas.width, canvas.height);
+}
+
+function setStatusLegacy(message, title = "状态") {
+  els.statusTitle.textContent = title;
+  els.statusCard.className = "status-card";
+  els.status.className = "status";
+  els.status.textContent = message;
+}
+
+function setBusyLegacy(isBusy, message) {
+  document.body.style.cursor = isBusy ? "progress" : "";
+  state.processing = isBusy;
+  els.cancelBtn.hidden = !isBusy;
+  if (message) {
+    els.statusTitle.textContent = isBusy ? "正在处理" : "状态";
+    els.statusCard.className = `status-card${isBusy ? " busy" : ""}`;
+    els.status.className = "status busy";
+    els.status.textContent = message;
+  }
+  els.processBtn.textContent = isBusy ? "处理中..." : "开始自动抠图";
+  els.processBtn.disabled = isBusy || !state.file;
+  els.rescanBtn.disabled = isBusy || !state.cutoutBlob;
+  els.copyCutoutBtn.disabled = isBusy || !state.cutoutBlob;
+  els.downloadCutoutBtn.disabled = isBusy || !state.cutoutBlob;
+  els.downloadZipBtn.disabled = isBusy || !state.components.length;
+  updateBatchButton();
+  updateSelectionButtons();
+  updateManualSelectionActions();
+  updateUiState();
+}
+
+function setErrorLegacy(message) {
+  els.statusTitle.textContent = "出现问题";
+  els.statusCard.className = "status-card error";
+  els.status.className = "status error";
+  els.status.textContent = message;
+}
+
+function setSuccessLegacy(message) {
+  els.statusTitle.textContent = "处理完成";
+  els.statusCard.className = "status-card success";
+  els.status.className = "status success";
+  els.status.textContent = message;
 }
 
 function setStatus(message, title = "状态") {

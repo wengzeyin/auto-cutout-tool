@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>自动抠图 & 批量切元素</title>
+    <title>Cutout Studio - 本地 AI 抠图与元素切图</title>
     <link rel="stylesheet" href="./styles.css" />
     <script type="importmap">
       {
@@ -18,21 +18,59 @@
     <main class="app app-empty" id="appRoot">
       <header class="hero">
         <nav class="topbar" aria-label="工具栏">
-          <span class="kicker">Cutout Studio</span>
+          <span class="kicker">Local AI Cutout Tool</span>
           <div class="actions">
             <button id="sampleBtn" type="button" class="ghost">载入示例</button>
             <button id="qaSampleBtn" type="button" class="ghost">载入测试图</button>
             <label class="primary">
               <input id="fileInput" type="file" accept="image/*" multiple />
-              选择图片
+              上传图片
             </label>
           </div>
         </nav>
 
         <section class="hero-grid">
           <div class="hero-copy">
-            <h1>自动抠图 & 批量切元素</h1>
-            <p>本地处理图片，一键去背景，自动拆分元素，支持 PNG / WebP / SVG / ZIP 导出。</p>
+            <span class="hero-pill">本地处理 · 透明 PNG · 批量 ZIP</span>
+            <h1>粘贴图片，自动抠图并切出元素</h1>
+            <p>在浏览器本地完成去背景、元素识别和批量导出。适合图标、贴纸、商品图和设计素材整理。</p>
+            <div class="hero-actions">
+              <label class="primary hero-upload">
+                <input id="heroFileInput" type="file" accept="image/*" multiple />
+                上传图片
+              </label>
+              <button id="heroSampleBtn" type="button" class="ghost">载入示例</button>
+            </div>
+            <div class="hero-hints" aria-label="支持能力">
+              <span>Ctrl+V 粘贴图片</span>
+              <span>PNG / WebP / SVG</span>
+              <span>1x / 2x / 3x</span>
+              <span>多元素拆分</span>
+            </div>
+          </div>
+
+          <div class="hero-demo" aria-label="抠图结果示意">
+            <div class="demo-card">
+              <div class="demo-toolbar">
+                <span>Before</span>
+                <span>After</span>
+              </div>
+              <div class="demo-scene">
+                <div class="demo-before"></div>
+                <div class="demo-after">
+                  <span class="demo-shape shape-a"></span>
+                  <span class="demo-shape shape-b"></span>
+                  <span class="demo-shape shape-c"></span>
+                </div>
+                <span class="demo-divider"></span>
+              </div>
+              <div class="demo-assets" aria-hidden="true">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+              <div class="demo-status">已识别 6 个元素 · 可导出透明 PNG</div>
+            </div>
           </div>
 
           <ol class="stepper" aria-label="处理流程">
@@ -54,18 +92,19 @@
 
       <section class="workspace">
         <aside class="panel">
-          <section id="dropZone" class="dropzone" role="button" tabindex="0" aria-label="选择或拖入图片">
-            <div class="drop-icon">+</div>
+          <section id="dropZone" class="dropzone" role="button" tabindex="0" aria-label="选择、拖入或粘贴图片">
+            <div class="drop-icon" aria-hidden="true">+</div>
             <div class="drop-copy">
               <strong>拖入图片、粘贴截图，或点击选择文件</strong>
-              <span>支持批量上传；首次使用会自动下载模型，图片仅在本地处理。</span>
+              <span>支持批量上传。首次使用会自动下载模型，图片只在本地处理。</span>
               <div class="drop-tags" aria-label="特点">
                 <span>本地处理</span>
-                <span>批量导出</span>
-                <span>支持 SVG</span>
+                <span>透明 PNG</span>
+                <span>批量 ZIP</span>
+                <span>SVG 导出</span>
               </div>
             </div>
-            <div id="uploadFeedback" class="upload-feedback">等待图片输入</div>
+            <div id="uploadFeedback" class="upload-feedback" aria-live="polite">等待图片输入</div>
           </section>
 
           <section class="panel-block queue-panel">
@@ -78,7 +117,7 @@
         </aside>
 
         <section class="stage">
-          <div class="status-card" id="statusCard">
+          <div class="status-card" id="statusCard" aria-live="polite">
             <div class="status-main">
               <span class="status-dot"></span>
               <div>
@@ -87,7 +126,7 @@
               </div>
             </div>
             <div class="progress-wrap" id="progressWrap" hidden>
-              <div class="progress-bar">
+              <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100">
                 <span id="progressFill"></span>
               </div>
               <output id="progressText">0%</output>
@@ -96,8 +135,8 @@
 
           <div class="preview-head">
             <div>
-              <h2>当前图片预览</h2>
-              <p>上传后可直接查看原图，处理完成后对比透明抠图结果。</p>
+              <h2>结果预览</h2>
+              <p>上传后优先查看原图和透明结果，下载按钮会出现在结果卡片旁。</p>
             </div>
             <div class="preview-controls">
               <div class="preview-tabs" role="group" aria-label="预览模式">
@@ -131,7 +170,7 @@
               </figcaption>
               <div class="preview-actions">
                 <button id="copyCutoutBtn" type="button" class="ghost" disabled>复制 PNG</button>
-                <button id="downloadCutoutBtn" type="button" class="ghost" disabled>下载整张抠图</button>
+                <button id="downloadCutoutBtn" type="button" class="ghost" disabled>下载 PNG</button>
               </div>
               <canvas id="resultCanvas"></canvas>
               <canvas id="overlayCanvas"></canvas>
@@ -141,7 +180,7 @@
           <section class="elements elements-muted">
             <div class="section-title">
               <div>
-                <h2>识别到的元素</h2>
+                <h2>元素资产</h2>
                 <span id="countLabel">0 个</span>
               </div>
               <div class="element-actions">
@@ -149,7 +188,7 @@
                 <button id="clearSelectionBtn" type="button" class="ghost" disabled>取消选择</button>
                 <button id="splitSelectedBtn" type="button" class="ghost" disabled>拆分此元素</button>
                 <button id="mergeSelectedBtn" type="button" class="ghost" disabled>合并选中</button>
-                <button id="downloadSelectedZipBtn" type="button" class="ghost" disabled>下载选中元素 ZIP</button>
+                <button id="downloadSelectedZipBtn" type="button" class="ghost" disabled>下载选中 ZIP</button>
                 <button id="downloadZipBtn" type="button" class="ghost" disabled>下载全部 ZIP</button>
               </div>
             </div>
@@ -167,7 +206,7 @@
               模型质量
               <select id="modelSelect">
                 <option value="isnet_quint8">快速</option>
-                <option value="isnet_fp16" selected>均衡</option>
+                <option value="isnet_fp16" selected>平衡</option>
                 <option value="isnet">精细</option>
               </select>
             </label>
@@ -187,22 +226,22 @@
               <summary>高级设置</summary>
               <label>
                 <span>透明阈值 <output id="alphaOut">32</output></span>
-                <small>边缘有残影时调高</small>
+                <small>边缘有残影时调高，调太高可能丢失细节。</small>
                 <input id="alphaThreshold" type="range" min="1" max="160" value="32" />
               </label>
               <label>
                 <span>色块容差 <output id="colorOut">48</output></span>
-                <small>插画色块拆分不准时调整</small>
+                <small>插画色块拆分不准时调整。</small>
                 <input id="colorTolerance" type="range" min="12" max="120" value="48" />
               </label>
               <label>
                 <span>最小元素面积 <output id="areaOut">800</output></span>
-                <small>碎片太多时调高</small>
+                <small>碎片太多时调高，小元素漏识别时调低。</small>
                 <input id="minArea" type="range" min="20" max="5000" step="20" value="800" />
               </label>
               <label>
                 拆分强度
-                <small>靠近元素被合并时改为强</small>
+                <small>靠近元素被合并时改为强。</small>
                 <select id="splitStrength">
                   <option value="conservative">保守</option>
                   <option value="standard" selected>标准</option>
@@ -211,49 +250,49 @@
               </label>
               <label>
                 <span>导出留边 <output id="padOut">12</output></span>
-                <small>给每个元素四周保留空白</small>
+                <small>给每个元素四周保留空白。</small>
                 <input id="padding" type="range" min="0" max="80" value="12" />
               </label>
               <label>
                 <span>边缘平滑 <output id="edgeSmoothOut">2</output></span>
-                <small>减少锯齿，数值越高越柔和</small>
+                <small>减少锯齿，数值越高越柔和。</small>
                 <input id="edgeSmooth" type="range" min="0" max="6" step="1" value="2" />
               </label>
               <label>
                 <span>羽化 <output id="featherOut">1</output></span>
-                <small>让边缘过渡更自然</small>
+                <small>让边缘过渡更自然。</small>
                 <input id="feather" type="range" min="0" max="5" step="1" value="1" />
               </label>
               <label>
                 <span>去残影 <output id="cleanupOut">24</output></span>
-                <small>清理低透明背景残留</small>
+                <small>清理低透明背景残留。</small>
                 <input id="cleanup" type="range" min="0" max="96" step="1" value="24" />
               </label>
               <label>
                 透明度增强
                 <select id="alphaBoost">
-                  <option value="soft">柔和</option>
-                  <option value="standard" selected>标准</option>
-                  <option value="clean">干净</option>
+                  <option value="soft">保真优先</option>
+                  <option value="standard" selected>平衡</option>
+                  <option value="clean">干净优先</option>
                 </select>
               </label>
               <label>
                 <span>边缘收缩/扩张 <output id="edgeOffsetOut">0</output></span>
-                <small>负数收缩边缘，正数扩张边缘</small>
+                <small>负数收缩边缘，正数扩张边缘。</small>
                 <input id="edgeOffset" type="range" min="-4" max="4" step="1" value="0" />
               </label>
               <label class="check-row">
                 <input id="showBoxes" type="checkbox" />
                 <span>
                   显示识别框
-                  <small>查看抠图结果时可关闭框线</small>
+                  <small>查看抠图结果时可关闭框线。</small>
                 </span>
               </label>
               <label class="check-row">
                 <input id="includeText" type="checkbox" />
                 <span>
                   包含文字元素
-                  <small>需要连文字一起导出时开启</small>
+                  <small>需要连文字一起导出时开启。</small>
                 </span>
               </label>
             </details>
@@ -292,7 +331,7 @@
             </label>
             <p class="export-hint" id="exportHint">处理完成后可导出 PNG / WebP / SVG。</p>
             <details class="svg-options" id="svgOptions" hidden>
-              <summary>SVG 矢量参数</summary>
+              <summary>SVG 矢量参数 <span class="experimental-tag">实验性</span></summary>
               <label>
                 SVG 模式
                 <select id="svgMode">
@@ -303,29 +342,29 @@
               </label>
               <label>
                 <span>颜色数量 <output id="svgColorsOut">自动</output></span>
-                <small>越高越接近原图，路径也更多</small>
+                <small>越高越接近原图，路径也会更多。</small>
                 <input id="svgColors" type="range" min="8" max="96" step="4" value="48" />
               </label>
               <label>
                 <span>路径平滑 <output id="svgSmoothOut">自动</output></span>
-                <small>越高越柔和，细节会减少</small>
+                <small>越高越柔和，细节会减少。</small>
                 <input id="svgSmooth" type="range" min="0" max="4" step="1" value="2" />
               </label>
               <label>
                 <span>细节保留 <output id="svgDetailOut">自动</output></span>
-                <small>提高可保留小装饰和线稿</small>
+                <small>提高可保留小装饰和线稿。</small>
                 <input id="svgDetail" type="range" min="1" max="5" step="1" value="3" />
               </label>
               <label>
                 <span>小碎片过滤 <output id="svgSpeckleOut">自动</output></span>
-                <small>碎点太多时调高</small>
+                <small>碎点太多时调高。</small>
                 <input id="svgSpeckle" type="range" min="0" max="5" step="1" value="2" />
               </label>
               <label class="check-row">
                 <input id="svgLineArt" type="checkbox" checked />
                 <span>
                   线稿保护
-                  <small>保留黑色描边和小线条</small>
+                  <small>保留黑色描边和小线条。</small>
                 </span>
               </label>
             </details>
@@ -337,11 +376,11 @@
               <h2>识别不准？</h2>
               <span>补救操作</span>
             </div>
-            <p class="small">重新识别，或开启手动框选，把粘连元素单独切出。</p>
+            <p class="small">重新识别、拆分大框，或开启手动框选，把粘连元素单独切出。</p>
             <label>
               锁定比例
               <select id="aspectLock">
-                <option value="free" selected>原始比例</option>
+                <option value="free" selected>自由比例</option>
                 <option value="1:1">1:1</option>
                 <option value="4:3">4:3</option>
                 <option value="16:9">16:9</option>
@@ -354,7 +393,7 @@
             </div>
             <button id="manualModeBtn" type="button" class="ghost" disabled>开启框选</button>
             <button id="exportSelectionBtn" type="button" class="ghost" disabled>导出当前框选</button>
-            <button id="addSelectionBtn" type="button" class="ghost" disabled>添加为元素框</button>
+            <button id="addSelectionBtn" type="button" class="ghost" disabled>保存为新元素</button>
             <button id="applySelectionBtn" type="button" class="ghost" disabled>更新选中元素</button>
           </section>
         </aside>
