@@ -99,6 +99,22 @@ const cases = [
     min: 8,
     max: 10,
   },
+  {
+    name: "clear-small-props-near-large-stickers",
+    draw: (img) => {
+      for (const cx of [150, 360, 570]) {
+        ellipse(img, cx, 190, 46, 62, 255);
+        ellipse(img, cx, 258, 42, 14, 36);
+      }
+      ellipse(img, 228, 228, 17, 15, 255);
+      ellipse(img, 448, 226, 18, 16, 255);
+      rect(img, 190, 244, 280, 10, 28);
+      rect(img, 196, 222, 12, 8, 30);
+      rect(img, 414, 222, 12, 8, 30);
+    },
+    min: 5,
+    max: 5,
+  },
 ];
 
 const failures = [];
@@ -330,6 +346,8 @@ function splitLargeComponent(component, imageData, coreMask, w, h, minCoreArea, 
   if (!largeBySize && !sparseLarge && !hasMultipleCore) return [];
   const ownershipChildren = splitBySeedOwnership(component, imageData, coreChildren, minCoreArea, pad, settings);
   if (ownershipChildren.length >= 2) return ownershipChildren;
+  const detachedSmallChildren = splitDetachedSmallSeedComponent(component, imageData, coreChildren, minCoreArea, pad, settings);
+  if (detachedSmallChildren.length >= 2) return detachedSmallChildren;
   if (!hasMultipleCore || (!sparseLarge && component.alphaDensity > 0.28)) return [];
   return coreChildren
     .filter((child) => child.area >= minCoreArea)
@@ -339,6 +357,29 @@ function splitLargeComponent(component, imageData, coreMask, w, h, minCoreArea, 
       return measureBoxAsComponent({ id: child.id, x: padded.minX, y: padded.minY, width: padded.maxX - padded.minX + 1, height: padded.maxY - padded.minY + 1 }, imageData, Math.max(24, settings.supportBase));
     })
     .filter((child) => keepMultiObjectComponent(child, imageArea, minCoreArea));
+}
+
+function splitDetachedSmallSeedComponent(component, imageData, coreChildren, minCoreArea, pad, settings) {
+  if ((settings.mergeDistance ?? 4) > 2 || !coreChildren || coreChildren.length < 2 || coreChildren.length > 8) return [];
+  const { width: w, height: h } = imageData;
+  const imageArea = w * h;
+  const splitPad = Math.max(1, Math.round(pad * settings.splitPaddingFactor));
+  const alphaThreshold = Math.max(24, settings.supportBase);
+  const children = coreChildren
+    .filter((child) => child.area >= minCoreArea)
+    .map((child, index) => {
+      const padded = padBox({ minX: child.x, minY: child.y, maxX: child.x + child.width - 1, maxY: child.y + child.height - 1 }, splitPad, w, h);
+      return measureBoxAsComponent({ id: index + 1, x: padded.minX, y: padded.minY, width: padded.maxX - padded.minX + 1, height: padded.maxY - padded.minY + 1 }, imageData, alphaThreshold);
+    })
+    .filter((child) => keepMultiObjectComponent(child, imageArea, minCoreArea));
+  if (children.length < 2) return [];
+  const largest = children.reduce((best, child) => (child.area > best.area ? child : best), children[0]);
+  const hasDetachedSmall = children.some((child) => child !== largest && isClearStandaloneSmallPart(child, largest, imageData, alphaThreshold));
+  if (!hasDetachedSmall) return [];
+  const parentArea = Math.max(1, component.area || measureComponent(component, imageData, alphaThreshold).alphaArea);
+  const childArea = children.reduce((sum, child) => sum + (child.area || 0), 0);
+  if (childArea < parentArea * 0.38) return [];
+  return sortComponentsReadingOrder(children);
 }
 
 function splitBySeedOwnership(component, imageData, coreChildren, minCoreArea, pad, settings) {
@@ -400,7 +441,8 @@ function splitBySeedOwnership(component, imageData, coreChildren, minCoreArea, p
   const childDensity = sorted.reduce((sum, child) => sum + child.alphaDensity, 0) / sorted.length;
   const childArea = sorted.reduce((sum, child) => sum + child.area, 0);
   if (childDensity < parentMetrics.alphaDensity * 0.78) return [];
-  if (childArea < parentMetrics.alphaArea * 0.72) return [];
+  const minChildCoverage = (settings.mergeDistance ?? 4) <= 2 ? 0.54 : 0.72;
+  if (childArea < parentMetrics.alphaArea * minChildCoverage) return [];
   return sorted;
 }
 
@@ -886,7 +928,13 @@ function shouldMergeAssetBoxes(a, b, imageData, alphaThreshold, settings) {
   const bothMeaningful = a.area > imageArea * 0.003 && b.area > imageArea * 0.003;
   const overlapRatio = boxOverlapRatio(a, b);
   if (bothMeaningful && hasWeakAlphaBridge(a, b, imageData, alphaThreshold, settings)) return false;
-  if (shouldAttachSmallPart(a, b, imageData, distance)) return true;
+  if (
+    (settings.mergeDistance ?? 4) <= 4
+    && hasStandaloneSmallPartSeparation(a, b, imageData, alphaThreshold)
+  ) {
+    return false;
+  }
+  if (shouldAttachSmallPart(a, b, imageData, distance, alphaThreshold, settings)) return true;
   if (bothMeaningful && settings.mergeDistance <= 4 && distance > settings.mergeDistance && overlapRatio < 0.36) return false;
   if (bothMeaningful && settings.mergeDistance <= 4 && overlapRatio < 0.22) return false;
   if (bothMeaningful && settings.mergeDistance <= 6 && distance > 0 && overlapRatio < 0.14) return false;
@@ -901,12 +949,13 @@ function shouldMergeAssetBoxes(a, b, imageData, alphaThreshold, settings) {
   return smallerArea < imageArea * 0.0015 || distance <= settings.mergeDistance || overlapRatio > 0.45;
 }
 
-function shouldAttachSmallPart(a, b, imageData, distance) {
+function shouldAttachSmallPart(a, b, imageData, distance, alphaThreshold = 32, settings = getSplitSettings()) {
   const imageArea = imageData.width * imageData.height;
   const smaller = a.area <= b.area ? a : b;
   const larger = smaller === a ? b : a;
   const areaRatio = smaller.area / Math.max(1, larger.area);
   if (areaRatio > 0.34 || smaller.area > imageArea * 0.018) return false;
+  if ((settings.mergeDistance ?? 4) <= 4 && isClearStandaloneSmallPart(smaller, larger, imageData, alphaThreshold)) return false;
   const attachDistance = Math.max(16, Math.min(imageData.width, imageData.height) * 0.038);
   if (distance > attachDistance) return false;
   const horizontalOverlap = axisOverlapRatio(smaller.x, smaller.width, larger.x, larger.width);
@@ -914,6 +963,99 @@ function shouldAttachSmallPart(a, b, imageData, distance) {
   const nearSideAttachment = verticalOverlap > 0.18 && distance <= attachDistance;
   const nearTopBottomAttachment = horizontalOverlap > 0.2 && distance <= attachDistance;
   return nearSideAttachment || nearTopBottomAttachment;
+}
+
+function hasStandaloneSmallPartSeparation(a, b, imageData, alphaThreshold) {
+  const smaller = a.area <= b.area ? a : b;
+  const larger = smaller === a ? b : a;
+  return isClearStandaloneSmallPart(smaller, larger, imageData, alphaThreshold);
+}
+
+function isClearStandaloneSmallPart(smaller, larger, imageData, alphaThreshold) {
+  const imageArea = imageData.width * imageData.height;
+  const threshold = Math.max(80, alphaThreshold * 2.4);
+  const measured = measureBoxAsComponent(smaller, imageData, Math.max(24, alphaThreshold));
+  const quality = scoreSmallComponent(measured, imageArea, Math.max(8, imageArea * 0.001));
+  const minDimension = Math.min(measured.width, measured.height);
+  if (quality < 0.78 || measured.alphaDensity < 0.24 || minDimension < 8) return false;
+
+  const smallContent = strongContentBounds(smaller, imageData, threshold);
+  const largeContent = strongContentBounds(larger, imageData, threshold);
+  if (!smallContent || !largeContent) return false;
+  const contentDistance = boxDistance(smallContent, largeContent);
+  const overlapX = axisOverlapRatio(smallContent.x, smallContent.width, largeContent.x, largeContent.width);
+  const overlapY = axisOverlapRatio(smallContent.y, smallContent.height, largeContent.y, largeContent.height);
+  const touchingTolerance = Math.max(2, Math.min(smallContent.width, smallContent.height) * 0.08);
+  if (contentDistance <= touchingTolerance || (overlapX > 0.18 && overlapY > 0.18)) return false;
+
+  const gap = gapRectBetweenBoxes(smallContent, largeContent);
+  if (!gap) return false;
+  const gapDensity = alphaDensityInRect(imageData, gap, threshold);
+  return gapDensity < 0.08;
+}
+
+function strongContentBounds(component, imageData, alphaThreshold) {
+  const { width: w, height: h, data } = imageData;
+  const startX = Math.max(0, Math.floor(component.x));
+  const startY = Math.max(0, Math.floor(component.y));
+  const endX = Math.min(w, Math.ceil(component.x + component.width));
+  const endY = Math.min(h, Math.ceil(component.y + component.height));
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let area = 0;
+  for (let y = startY; y < endY; y += 1) {
+    for (let x = startX; x < endX; x += 1) {
+      if (data[(y * w + x) * 4 + 3] < alphaThreshold) continue;
+      area += 1;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
+  if (!area) return null;
+  return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1, area };
+}
+
+function alphaDensityInRect(imageData, rect, alphaThreshold) {
+  const { width: w, height: h, data } = imageData;
+  const startX = Math.max(0, Math.floor(rect.x));
+  const startY = Math.max(0, Math.floor(rect.y));
+  const endX = Math.min(w, Math.ceil(rect.x + rect.width));
+  const endY = Math.min(h, Math.ceil(rect.y + rect.height));
+  let total = 0;
+  let opaque = 0;
+  for (let y = startY; y < endY; y += 1) {
+    for (let x = startX; x < endX; x += 1) {
+      total += 1;
+      if (data[(y * w + x) * 4 + 3] >= alphaThreshold) opaque += 1;
+    }
+  }
+  return total ? opaque / total : 1;
+}
+
+function gapRectBetweenBoxes(a, b) {
+  const ax2 = a.x + a.width;
+  const ay2 = a.y + a.height;
+  const bx2 = b.x + b.width;
+  const by2 = b.y + b.height;
+  const verticalOverlap = Math.min(ay2, by2) - Math.max(a.y, b.y);
+  const horizontalOverlap = Math.min(ax2, bx2) - Math.max(a.x, b.x);
+  if (a.x <= bx2 && b.x <= ax2 && verticalOverlap > 0) return null;
+  if (a.y <= by2 && b.y <= ay2 && horizontalOverlap > 0) return null;
+  if (ax2 <= b.x || bx2 <= a.x) {
+    const left = ax2 <= b.x ? ax2 : bx2;
+    const right = ax2 <= b.x ? b.x : a.x;
+    return { x: left, y: Math.max(a.y, b.y), width: right - left, height: Math.max(1, verticalOverlap) };
+  }
+  if (ay2 <= b.y || by2 <= a.y) {
+    const top = ay2 <= b.y ? ay2 : by2;
+    const bottom = ay2 <= b.y ? b.y : a.y;
+    return { x: Math.max(a.x, b.x), y: top, width: Math.max(1, horizontalOverlap), height: bottom - top };
+  }
+  return null;
 }
 
 function hasWeakAlphaBridge(a, b, imageData, alphaThreshold, settings) {

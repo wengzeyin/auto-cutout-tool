@@ -1,6 +1,6 @@
 # QA Run Summary
 
-Run time: 2026-07-09 15:45 Asia/Shanghai
+Run time: 2026-07-09 15:58 Asia/Shanghai
 
 Mode: mixed QA scenarios
 Export format: PNG / WebP / SVG validation
@@ -19,7 +19,7 @@ Export scale: 1x baseline with size checks
 - Line art risk: 0
 - Light region risk: 0
 - Semi-transparent core risk: 0
-- ZIP: `qa/run-output/cutout-batch-20260709-1545.zip`
+- ZIP: `qa/run-output/cutout-batch-20260709-1558.zip`
 - Raw report: `qa/run-output/qa-report.latest.json`
 
 ## Per Image Metrics
@@ -45,9 +45,9 @@ Export scale: 1x baseline with size checks
 ## Findings
 
 - Full 15-image QA regression passed with average score 4.79.
-- Added original-context protection for enclosed pale and white illustration details, so eye whites, flame cores, light fills, and similar internal sticker details can be restored without treating one-sided white fringe as foreground.
-- QA comparison against the previous baseline passed with no regressions.
-- The strongest measured improvement is small-detail sticker white fringe: `whiteFringeRatio` 0.0589 -> 0.0298 and `whiteFringeAreaRatio` 0.0012 -> 0.0006.
+- Added standalone-small-part protection for multi-object split mode: clear small props with strong alpha content and a real strong-alpha gap are no longer merged into nearby large stickers just because padded boxes touch.
+- Added a targeted regression case where two small props sit near three large stickers with low-alpha shadow bridges; expected output is 5 separate components.
+- QA comparison against the previous baseline passed with no regressions in component count, large-box risk, small-element risk, matte, or SVG metrics.
 - Current algorithmic limiting cases remain: photo-like semi-transparent core on curly/short fur and complex-background person, product edge jaggedness, and complex-background product light-region loss.
 
 ## Not Covered
