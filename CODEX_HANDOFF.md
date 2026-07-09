@@ -10,11 +10,13 @@ This file is for continuing the project from another Codex thread or device.
   - `8da0f03 Improve split QA and Windows runner portability`
   - `Refine result-first UI workbench`
   - `Improve processing states and mobile flow`
-  - current `HEAD`: `Improve preview controls accessibility`
+  - `Improve preview controls accessibility`
+  - current `HEAD`: `Upgrade element asset panel`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
 - The fourth commit completes Stage 3 of the UI pass with accessible preview controls and keyboard navigation.
+- The fifth commit completes Stage 4 of the UI pass with denser, more usable element asset cards.
 
 ## Product Direction
 
@@ -64,12 +66,13 @@ Target: move the app from a parameter-heavy technical page to a result-first des
 - Committed locally as `Improve preview controls accessibility`.
 - Browser verification in the in-app browser was still blocked by localhost URL policy; automatic QA and static checks passed.
 
-### Stage 4: P1 Asset Panel
+### Stage 4: P1 Asset Panel - Done
 
 - Upgrade element cards to feel like a design asset panel.
 - Improve hover, selected, and batch actions.
 - Add lazy/skeleton behavior if needed.
-- Commit after local validation.
+- Added clearer element headers, export metrics, content coverage, persistent action buttons, selected badges, and thumbnail click selection.
+- Committed locally as `Upgrade element asset panel`.
 
 ### Stage 5: P1/P2 Visual Polish
 

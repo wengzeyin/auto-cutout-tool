@@ -4492,6 +4492,7 @@ function renderCards() {
     const card = document.createElement("article");
     const selected = state.selectedComponentIds.has(component.id);
     card.className = `element-card${selected ? " selected" : ""}`;
+    card.setAttribute("aria-label", `Asset ${String(component.id).padStart(2, "0")}, ${component.width} x ${component.height}`);
 
     const thumb = document.createElement("div");
     thumb.className = "thumb";
@@ -4501,10 +4502,27 @@ function renderCards() {
     queueThumbnail(img, component);
     thumb.append(img);
 
-    const meta = document.createElement("div");
-    meta.className = "meta";
     const size = getExportSize(component);
+    const header = document.createElement("div");
+    header.className = "asset-header";
+    header.innerHTML = `
+      <div>
+        <strong>元素 ${String(component.id).padStart(2, "0")}</strong>
+        <span>${component.width} x ${component.height}px</span>
+      </div>
+      <span class="asset-badge">${selected ? "已选择" : getExportSettings().label}</span>
+    `;
+
+    const meta = document.createElement("div");
+    meta.className = "asset-meta";
     meta.innerHTML = `<strong>元素 ${String(component.id).padStart(2, "0")}</strong><span>${component.width} x ${component.height} @${size.scale}x -> ${size.width} x ${size.height}</span>`;
+
+    const coverage = Math.round((component.area / Math.max(1, component.width * component.height)) * 100);
+    meta.innerHTML = `
+      <span><strong>${size.width} x ${size.height}</strong><small>导出尺寸</small></span>
+      <span><strong>${size.scale}x</strong><small>倍数</small></span>
+      <span><strong>${coverage}%</strong><small>内容占比</small></span>
+    `;
 
     const checkbox = document.createElement("label");
     checkbox.className = "asset-check";
@@ -4545,6 +4563,13 @@ function renderCards() {
     actions.className = "asset-actions";
     actions.append(button, split, adjust, remove);
 
+    thumb.addEventListener("click", () => {
+      if (state.selectedComponentIds.has(component.id)) state.selectedComponentIds.delete(component.id);
+      else state.selectedComponentIds.add(component.id);
+      renderCards();
+      drawOverlay(component.id);
+    });
+
     card.addEventListener("mouseenter", () => {
       drawOverlay(component.id);
     });
@@ -4552,7 +4577,7 @@ function renderCards() {
       drawOverlay();
     });
 
-    card.append(thumb, meta, checkbox, actions);
+    card.append(header, thumb, meta, checkbox, actions);
     els.elementGrid.append(card);
   }
 
@@ -4919,6 +4944,7 @@ function updateSelectionButtons() {
       ? `下载选中 ${selectedCount} 个 ZIP`
       : "下载选中元素 ZIP";
   updateManualSelectionActions();
+  updateDisabledHints();
 }
 
 function computeCurrentQaMetrics() {
