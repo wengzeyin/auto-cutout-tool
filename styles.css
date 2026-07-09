@@ -795,6 +795,95 @@ output {
   margin-bottom: 3px;
 }
 
+.status-steps {
+  list-style: none;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-soft);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.status-step {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 7px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.status-step span {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  background: #ffffff;
+  box-shadow: inset 0 0 0 4px #ffffff;
+}
+
+.status-step strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-step.active,
+.status-step.done {
+  color: var(--ink);
+}
+
+.status-step.active span {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.status-step.done span {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.status-step.done span::after {
+  content: "";
+  display: block;
+  width: 8px;
+  height: 5px;
+  margin: 4px auto 0;
+  border-left: 2px solid var(--accent);
+  border-bottom: 2px solid var(--accent);
+  transform: rotate(-45deg);
+}
+
+.status-card.error .status-step.active span {
+  border-color: var(--danger);
+  background: #fff0ee;
+}
+
+.status-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.status-actions[hidden] {
+  display: none;
+}
+
+.status-actions .ghost {
+  min-height: 34px;
+  border-radius: 999px;
+  font-size: 13px;
+}
+
+.status-card.success .status-actions {
+  display: flex;
+}
+
 .progress-wrap {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 42px;
@@ -1578,6 +1667,18 @@ canvas {
     order: 2;
   }
 
+  .status-steps {
+    grid-template-columns: 1fr;
+  }
+
+  .status-actions {
+    justify-content: stretch;
+  }
+
+  .status-actions .ghost {
+    flex: 1;
+  }
+
   .preview-head {
     order: 3;
     flex-direction: column;
@@ -1595,15 +1696,15 @@ canvas {
     min-height: 0;
   }
 
-  .process-panel {
+  .export-panel {
     order: 5;
   }
 
-  .export-panel {
+  .elements {
     order: 6;
   }
 
-  .elements {
+  .process-panel {
     order: 7;
   }
 

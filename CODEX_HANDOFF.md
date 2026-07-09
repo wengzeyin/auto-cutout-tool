@@ -8,9 +8,11 @@ This file is for continuing the project from another Codex thread or device.
 - Branch: `main`
 - Local-only commits not pushed yet:
   - `8da0f03 Improve split QA and Windows runner portability`
-  - current `HEAD`: `Refine result-first UI workbench`
+  - `Refine result-first UI workbench`
+  - current `HEAD`: `Improve processing states and mobile flow`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
+- The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
 
 ## Product Direction
 
@@ -43,12 +45,13 @@ Target: move the app from a parameter-heavy technical page to a result-first des
 - Reduce queue visual weight.
 - Committed locally as `Refine result-first UI workbench`.
 
-### Stage 2: P0 States and Mobile Flow
+### Stage 2: P0 States and Mobile Flow - Done
 
 - Add clearer processing stages.
 - Improve completion and error states.
 - Reorder mobile layout: upload, result, export, elements, queue, advanced.
-- Commit after local validation.
+- Committed locally as `Improve processing states and mobile flow`.
+- Browser verification in the in-app browser was blocked by localhost URL policy; automatic QA and static checks passed.
 
 ### Stage 3: P1 Controls and Accessibility
 

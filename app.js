@@ -71,6 +71,8 @@ const els = {
   status: document.querySelector("#status"),
   statusTitle: document.querySelector("#statusTitle"),
   statusCard: document.querySelector("#statusCard"),
+  statusSteps: [...document.querySelectorAll("[data-status-step]")],
+  statusActions: document.querySelector("#statusActions"),
   progressWrap: document.querySelector("#progressWrap"),
   progressFill: document.querySelector("#progressFill"),
   progressText: document.querySelector("#progressText"),
@@ -143,6 +145,8 @@ renderQueue();
 function updateUiState() {
   const hasImage = Boolean(state.currentItem);
   const hasResult = Boolean(state.cutoutBlob);
+  if (!state.processing && hasResult) updateStatusStage("done");
+  else if (!state.processing) updateStatusStage(hasImage ? "load" : "empty");
   els.appRoot.classList.toggle("app-empty", !hasImage);
   els.appRoot.classList.toggle("app-has-image", hasImage && !hasResult);
   els.appRoot.classList.toggle("app-done", hasResult);
@@ -165,6 +169,28 @@ function updateUiState() {
   if (!hasImage) els.mobilePrimaryBtn.textContent = "选择图片开始";
   else if (!hasResult) els.mobilePrimaryBtn.textContent = "开始自动抠图";
   else els.mobilePrimaryBtn.textContent = `导出 ${getExportSettings().label}`;
+}
+
+function updateStatusStage(stage) {
+  const order = ["load", "matte", "assets"];
+  const activeStage = stage === "empty" ? "load" : stage === "done" ? "assets" : stage;
+  const activeIndex = Math.max(0, order.indexOf(activeStage));
+
+  for (const step of els.statusSteps) {
+    const stepIndex = order.indexOf(step.dataset.statusStep);
+    const isDone = stage === "done" || stepIndex < activeIndex;
+    step.classList.toggle("done", isDone);
+    step.classList.toggle("active", stepIndex === activeIndex && !isDone);
+  }
+
+  if (els.statusActions) {
+    els.statusActions.hidden = stage !== "done";
+  }
+}
+
+function scrollWorkbenchTarget(target) {
+  const selector = target === "assets" ? ".elements" : ".export-panel";
+  document.querySelector(selector)?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function setPreviewMode(mode) {
@@ -236,6 +262,10 @@ function bindEvents() {
   els.splitSelectedBtn.addEventListener("click", splitSelectedComponent);
   els.mergeSelectedBtn.addEventListener("click", mergeSelectedComponents);
   els.mobilePrimaryBtn.addEventListener("click", handleMobilePrimary);
+  els.statusActions?.addEventListener("click", (event) => {
+    const action = event.target.closest("[data-status-action]")?.dataset.statusAction;
+    if (action) scrollWorkbenchTarget(action);
+  });
   els.formatSelect.addEventListener("change", () => {
     syncOutputs();
     updateDownloadLabels();
@@ -1205,6 +1235,7 @@ async function scanAndRender() {
   state.scanning = true;
   try {
     setStatus("正在识别完整元素...");
+    updateStatusStage("assets");
     await redrawCutoutCanvas();
     let fullImageData = resultCtx.getImageData(0, 0, els.resultCanvas.width, els.resultCanvas.height);
     if (!els.includeText.checked) {
@@ -5617,9 +5648,11 @@ function setStatus(message, title = "状态") {
   els.statusCard.className = "status-card";
   els.status.className = "status";
   els.status.textContent = message;
+  if (!state.cutoutBlob) updateStatusStage(state.currentItem ? "load" : "empty");
 }
 
 function setBusy(isBusy, message) {
+  if (isBusy) updateStatusStage("matte");
   document.body.style.cursor = isBusy ? "progress" : "";
   state.processing = isBusy;
   els.cancelBtn.hidden = !isBusy;
@@ -5646,6 +5679,7 @@ function setError(message) {
   els.statusCard.className = "status-card error";
   els.status.className = "status error";
   els.status.textContent = message;
+  if (els.statusActions) els.statusActions.hidden = true;
 }
 
 function setSuccess(message) {
@@ -5653,17 +5687,20 @@ function setSuccess(message) {
   els.statusCard.className = "status-card success";
   els.status.className = "status success";
   els.status.textContent = message;
+  updateStatusStage("done");
 }
 
 function setProgress(percent, label = `${percent}%`) {
   els.progressWrap.hidden = false;
   els.progressFill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+  els.progressWrap.querySelector("[role='progressbar']")?.setAttribute("aria-valuenow", String(Math.round(percent)));
   els.progressText.value = label;
 }
 
 function hideProgress() {
   els.progressWrap.hidden = true;
   els.progressFill.style.width = "0%";
+  els.progressWrap.querySelector("[role='progressbar']")?.setAttribute("aria-valuenow", "0");
   els.progressText.value = "0%";
 }
 

@@ -125,11 +125,29 @@
                 <p class="status" id="status">请选择一张图片。</p>
               </div>
             </div>
+            <ol class="status-steps" aria-label="当前处理阶段">
+              <li class="status-step active" data-status-step="load">
+                <span></span>
+                <strong>载入图片</strong>
+              </li>
+              <li class="status-step" data-status-step="matte">
+                <span></span>
+                <strong>生成透明图</strong>
+              </li>
+              <li class="status-step" data-status-step="assets">
+                <span></span>
+                <strong>识别元素</strong>
+              </li>
+            </ol>
             <div class="progress-wrap" id="progressWrap" hidden>
               <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100">
                 <span id="progressFill"></span>
               </div>
               <output id="progressText">0%</output>
+            </div>
+            <div class="status-actions" id="statusActions" hidden>
+              <button type="button" class="ghost" data-status-action="export">查看导出</button>
+              <button type="button" class="ghost" data-status-action="assets">检查元素</button>
             </div>
           </div>
 
