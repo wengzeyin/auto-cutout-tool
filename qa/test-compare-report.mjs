@@ -4,11 +4,14 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 const workDir = await mkdtemp(path.join(tmpdir(), "cutout-qa-compare-"));
+const root = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const baselinePath = path.join(workDir, "baseline.json");
 const improvedPath = path.join(workDir, "improved.json");
 const regressedPath = path.join(workDir, "regressed.json");
+const nodeBin = process.env.NODE_BINARY || (process.platform === "win32" ? "node" : process.execPath);
 
 await writeFile(baselinePath, JSON.stringify(makeReport("baseline"), null, 2));
 await writeFile(improvedPath, JSON.stringify(makeReport("improved"), null, 2));
@@ -38,8 +41,8 @@ console.log(JSON.stringify(result, null, 2));
 if (failures.length) process.exit(1);
 
 function runCompare(base, candidate) {
-  return spawnSync(process.execPath, ["qa/compare-report.mjs", base, candidate], {
-    cwd: path.resolve(new URL("..", import.meta.url).pathname),
+  return spawnSync(nodeBin, ["qa/compare-report.mjs", base, candidate], {
+    cwd: root,
     encoding: "utf8",
   });
 }

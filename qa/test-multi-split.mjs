@@ -115,6 +115,19 @@ const cases = [
     min: 5,
     max: 5,
   },
+  {
+    name: "opaque-subjects-on-low-alpha-platform",
+    draw: (img) => {
+      for (const cx of [160, 330, 500, 670]) {
+        ellipse(img, cx, 165, 44, 58, 255);
+        rect(img, cx - 24, 215, 48, 52, 248);
+      }
+      rect(img, 96, 248, 630, 22, 58);
+      rect(img, 116, 272, 590, 10, 34);
+    },
+    min: 4,
+    max: 4,
+  },
 ];
 
 const failures = [];
@@ -447,14 +460,21 @@ function splitBySeedOwnership(component, imageData, coreChildren, minCoreArea, p
 }
 
 function hasProjectionValleyBetweenChildren(children, component, imageData, axis, settings) {
+  if (children.length < 2) return false;
+  const alphaThreshold = Math.max(24, settings.supportBase);
+  const strongThreshold = Math.max(96, alphaThreshold * 3.2);
   const valleys = [];
+  const strongValleys = [];
   for (let index = 0; index < children.length - 1; index += 1) {
     const left = children[index];
     const right = children[index + 1];
     const cut = axis === "x" ? Math.round((left.x + left.width + right.x) / 2) : Math.round((left.y + left.height + right.y) / 2);
-    valleys.push(projectionStripDensity(component, imageData.data, imageData.width, imageData.height, axis, cut, Math.max(24, settings.supportBase)));
+    valleys.push(projectionStripDensity(component, imageData.data, imageData.width, imageData.height, axis, cut, alphaThreshold));
+    strongValleys.push(projectionStripDensity(component, imageData.data, imageData.width, imageData.height, axis, cut, strongThreshold));
   }
-  return valleys.some((value) => value <= 0.18) || (valleys.length >= 2 && valleys.reduce((sum, value) => sum + value, 0) / valleys.length <= 0.26);
+  return valleys.some((value) => value <= 0.18)
+    || strongValleys.some((value) => value <= 0.08)
+    || (valleys.length >= 2 && valleys.reduce((sum, value) => sum + value, 0) / valleys.length <= 0.26);
 }
 
 function projectionStripDensity(component, data, w, h, axis, cut, alphaThreshold) {

@@ -4,6 +4,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 const scenarios = [
   "人像发丝模拟",
@@ -24,8 +25,10 @@ const scenarios = [
 ];
 
 const workDir = await mkdtemp(path.join(tmpdir(), "cutout-qa-validate-"));
+const root = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const passPath = path.join(workDir, "qa-pass.json");
 const failPath = path.join(workDir, "qa-fail.json");
+const nodeBin = process.env.NODE_BINARY || (process.platform === "win32" ? "node" : process.execPath);
 
 await writeFile(passPath, JSON.stringify(makeReport({ fail: false }), null, 2));
 await writeFile(failPath, JSON.stringify(makeReport({ fail: true }), null, 2));
@@ -51,8 +54,8 @@ console.log(JSON.stringify(result, null, 2));
 if (failures.length) process.exit(1);
 
 function runValidator(reportPath) {
-  return spawnSync(process.execPath, ["qa/validate-report.mjs", reportPath], {
-    cwd: path.resolve(new URL("..", import.meta.url).pathname),
+  return spawnSync(nodeBin, ["qa/validate-report.mjs", reportPath], {
+    cwd: root,
     encoding: "utf8",
   });
 }

@@ -3,11 +3,13 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const root = path.resolve(new URL("..", import.meta.url).pathname);
+const root = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const port = Number(process.env.TEST_QA_HEALTH_PORT || 4291);
 const token = `health-${process.pid}-${Date.now()}`;
 const failures = [];
+const nodeBin = process.env.NODE_BINARY || (process.platform === "win32" ? "node" : process.execPath);
 
 const server = startServer({ port, token });
 
@@ -40,7 +42,7 @@ console.log(JSON.stringify(result, null, 2));
 if (failures.length) process.exit(1);
 
 function startServer({ port, token }) {
-  return spawn(process.execPath, ["server.mjs"], {
+  return spawn(nodeBin, ["server.mjs"], {
     cwd: root,
     env: { ...process.env, PORT: String(port), QA_SERVER_TOKEN: token },
     stdio: ["ignore", "ignore", "ignore"],

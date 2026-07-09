@@ -15,6 +15,7 @@ const port = explicitPort ? Number(process.env.PORT) : await findFreePort();
 const baseUrl = `http://localhost:${port}`;
 const timeoutMs = Number(process.env.QA_TIMEOUT_MS || 8 * 60 * 1000);
 const nodeModules = process.env.NODE_PATH || "/Users/wzy/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules";
+const nodeBin = process.env.NODE_BINARY || (process.platform === "win32" ? "node" : process.execPath);
 const qaServerToken = `qa-${process.pid}-${Date.now()}`;
 
 const require = createRequire(import.meta.url);
@@ -58,7 +59,7 @@ try {
   const reportPath = path.join(outputDir, "qa-report.latest.json");
   await writeFile(reportPath, reportJson);
 
-  const validation = spawnSync(process.execPath, ["qa/validate-report.mjs", reportPath], {
+  const validation = spawnSync(nodeBin, ["qa/validate-report.mjs", reportPath], {
     cwd: root,
     encoding: "utf8",
   });
@@ -124,7 +125,7 @@ async function gotoQaPage(page) {
 }
 
 function startServer() {
-  const child = spawn(process.execPath, ["server.mjs"], {
+  const child = spawn(nodeBin, ["server.mjs"], {
     cwd: root,
     env: { ...process.env, PORT: String(port), QA_SERVER_TOKEN: qaServerToken },
     stdio: ["ignore", "pipe", "pipe"],

@@ -2652,7 +2652,9 @@ function hasProjectionValleyBetweenChildren(children, component, imageData, axis
   if (children.length < 2) return false;
   const { width, data } = imageData;
   const alphaThreshold = Math.max(24, settings.supportBase);
+  const strongThreshold = Math.max(96, alphaThreshold * 3.2);
   const valleys = [];
+  const strongValleys = [];
   for (let index = 0; index < children.length - 1; index += 1) {
     const left = children[index];
     const right = children[index + 1];
@@ -2660,9 +2662,13 @@ function hasProjectionValleyBetweenChildren(children, component, imageData, axis
       ? Math.round((left.x + left.width + right.x) / 2)
       : Math.round((left.y + left.height + right.y) / 2);
     const strip = projectionStripDensity(component, data, width, imageData.height, axis, cut, alphaThreshold);
+    const strongStrip = projectionStripDensity(component, data, width, imageData.height, axis, cut, strongThreshold);
     valleys.push(strip);
+    strongValleys.push(strongStrip);
   }
-  return valleys.some((value) => value <= 0.18) || (
+  return valleys.some((value) => value <= 0.18)
+    || strongValleys.some((value) => value <= 0.08)
+    || (
     valleys.length >= 2 && valleys.reduce((sum, value) => sum + value, 0) / valleys.length <= 0.26
   );
 }
