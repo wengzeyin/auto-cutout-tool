@@ -12,6 +12,7 @@ for (const [x, y, color] of [
 ]) {
   setPixel(imageData, x, y, color);
 }
+rect(imageData, 26, 28, 5, 5, [37, 99, 235, 255]);
 for (let x = 45; x < 112; x += 1) {
   setPixel(imageData, x, 87, [12, 12, 12, 255]);
   if (x % 8 !== 0) setPixel(imageData, x, 88, [12, 12, 12, 255]);
@@ -36,6 +37,8 @@ const visibleArea = [...groups.values()].reduce((sum, group) => sum + group.area
 const commandDensity = commandCount / Math.max(1, Math.sqrt(visibleArea));
 const gridAlignedRatio = measureGridAlignedCoordinateRatio(paths);
 const hasCubic = /C/.test(paths);
+const tinyBlueGroup = [...groups.entries()].find(([key, group]) => group.area >= 18 && group.area <= 40 && keyIsBlue(key))?.[1];
+const tinyBlueHasCubic = Boolean(tinyBlueGroup && /C/.test(tinyBlueGroup.path));
 const hasOpacityGroups = [...groups.keys()].some((key) => !key.endsWith("|1"));
 const tinyRegionCount = [...groups.values()].filter((group) => group.area < 14).length;
 const darkGroup = [...groups.entries()].find(([key]) => /^#/.test(key) && keyLightness(key) < 70)?.[1];
@@ -43,6 +46,7 @@ const failures = [];
 
 if (pathCount < 3 || pathCount > 8) failures.push(`Expected 3-8 paths, got ${pathCount}.`);
 if (!hasCubic) failures.push("Expected precise SVG to include cubic curve commands.");
+if (!tinyBlueHasCubic) failures.push("Expected small precise-mode details to use cubic paths instead of blocky straight-line boxes.");
 if (hasOpacityGroups) failures.push("Expected precise flat artwork SVG to merge alpha into solid color paths.");
 if (commandDensity > 18) failures.push(`Command density ${commandDensity.toFixed(2)} is too high.`);
 if (commandCount > 650) failures.push(`Command count ${commandCount} is too high for simple flat artwork.`);
@@ -83,6 +87,7 @@ const result = {
   gridAlignedRatio: Math.round(gridAlignedRatio * 100) / 100,
   tinyRegionCount,
   darkArea: darkGroup?.area || 0,
+  tinyBlueHasCubic,
   hasCubic,
   hasOpacityGroups,
   photoPathCount,
@@ -352,7 +357,7 @@ function simplifyOrthogonalLoop(points) {
 
 function loopToPath(loop, vectorSettings) {
   if (loop.length < 4) return "";
-  if (vectorSettings.mode === "precise" && loop.length > 8) return loopToCubicPath(loop, vectorSettings);
+  if (vectorSettings.mode === "precise" && loop.length > 4) return loopToCubicPath(loop, vectorSettings);
   const start = loop[0];
   let d = `M${start[0]} ${start[1]}`;
   for (let index = 1; index < loop.length - 1; index += 1) d += `L${roundPathNumber(loop[index][0])} ${roundPathNumber(loop[index][1])}`;
@@ -536,6 +541,15 @@ function keyLightness(key) {
   const green = parseInt(hex.slice(3, 5), 16);
   const blue = parseInt(hex.slice(5, 7), 16);
   return colorMetrics(red, green, blue).lightness;
+}
+
+function keyIsBlue(key) {
+  const hex = key.split("|")[0] || "";
+  if (!/^#[0-9a-f]{6}$/i.test(hex)) return false;
+  const red = parseInt(hex.slice(1, 3), 16);
+  const green = parseInt(hex.slice(3, 5), 16);
+  const blue = parseInt(hex.slice(5, 7), 16);
+  return blue > red + 60 && blue > green + 24;
 }
 
 function roundPathNumber(value) {

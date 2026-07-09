@@ -5814,7 +5814,7 @@ function simplifyOrthogonalLoop(points) {
 
 function loopToPath(loop, vectorSettings = {}) {
   if (loop.length < 4) return "";
-  if (vectorSettings.mode === "precise" && loop.length > 8) return loopToCubicPath(loop, vectorSettings);
+  if (vectorSettings.mode === "precise" && loop.length > 4) return loopToCubicPath(loop, vectorSettings);
   const start = loop[0];
   let d = `M${start[0]} ${start[1]}`;
   if (loop.length > 10) {
