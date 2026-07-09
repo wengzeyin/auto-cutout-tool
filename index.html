@@ -157,14 +157,14 @@
               <p>上传后优先查看原图和透明结果，下载按钮会出现在结果卡片旁。</p>
             </div>
             <div class="preview-controls">
-              <div class="preview-tabs" role="group" aria-label="预览模式">
-                <button type="button" class="preview-toggle active" data-preview="split">并排对比</button>
-                <button type="button" class="preview-toggle" data-preview="result">只看结果</button>
+              <div class="preview-tabs" role="tablist" aria-label="预览模式">
+                <button id="previewTabSplit" type="button" class="preview-toggle active" role="tab" aria-selected="true" aria-controls="previewArea" data-preview="split">并排对比</button>
+                <button id="previewTabResult" type="button" class="preview-toggle" role="tab" aria-selected="false" aria-controls="previewArea" tabindex="-1" data-preview="result">只看结果</button>
               </div>
-              <div class="background-tabs" role="group" aria-label="结果背景">
-                <button type="button" class="background-toggle active" data-bg="checker">棋盘格</button>
-                <button type="button" class="background-toggle" data-bg="white">白底</button>
-                <button type="button" class="background-toggle" data-bg="black">黑底</button>
+              <div class="background-tabs" role="toolbar" aria-label="结果背景">
+                <button type="button" class="background-toggle active" aria-pressed="true" data-bg="checker">棋盘格</button>
+                <button type="button" class="background-toggle" aria-pressed="false" data-bg="white">白底</button>
+                <button type="button" class="background-toggle" aria-pressed="false" data-bg="black">黑底</button>
                 <label class="background-color-label" title="彩色背景">
                   <span>彩色</span>
                   <input id="previewBgColor" type="color" value="#34c786" aria-label="选择彩色背景" />
@@ -173,7 +173,7 @@
             </div>
           </div>
 
-          <div class="canvases preview-split" id="previewArea">
+          <div class="canvases preview-split" id="previewArea" role="tabpanel" aria-labelledby="previewTabSplit">
             <figure class="preview-card source-card">
               <figcaption>
                 <strong>原图</strong>
@@ -187,8 +187,8 @@
                 <span id="resultBadge">待处理</span>
               </figcaption>
               <div class="preview-actions">
-                <button id="copyCutoutBtn" type="button" class="ghost" disabled>复制 PNG</button>
-                <button id="downloadCutoutBtn" type="button" class="ghost" disabled>下载 PNG</button>
+                <button id="copyCutoutBtn" type="button" class="ghost" data-disabled-reason="处理完成后可复制透明 PNG" disabled>复制 PNG</button>
+                <button id="downloadCutoutBtn" type="button" class="ghost" data-disabled-reason="处理完成后可下载当前抠图" disabled>下载 PNG</button>
               </div>
               <canvas id="resultCanvas"></canvas>
               <canvas id="overlayCanvas"></canvas>
@@ -202,12 +202,12 @@
                 <span id="countLabel">0 个</span>
               </div>
               <div class="element-actions">
-                <button id="selectAllBtn" type="button" class="ghost" disabled>全选</button>
-                <button id="clearSelectionBtn" type="button" class="ghost" disabled>取消选择</button>
-                <button id="splitSelectedBtn" type="button" class="ghost" disabled>拆分此元素</button>
-                <button id="mergeSelectedBtn" type="button" class="ghost" disabled>合并选中</button>
-                <button id="downloadSelectedZipBtn" type="button" class="ghost" disabled>下载选中 ZIP</button>
-                <button id="downloadZipBtn" type="button" class="ghost" disabled>下载全部 ZIP</button>
+                <button id="selectAllBtn" type="button" class="ghost" data-disabled-reason="识别到元素后可全选" disabled>全选</button>
+                <button id="clearSelectionBtn" type="button" class="ghost" data-disabled-reason="选择元素后可取消选择" disabled>取消选择</button>
+                <button id="splitSelectedBtn" type="button" class="ghost" data-disabled-reason="选中一个元素后可拆分" disabled>拆分此元素</button>
+                <button id="mergeSelectedBtn" type="button" class="ghost" data-disabled-reason="至少选择两个元素后可合并" disabled>合并选中</button>
+                <button id="downloadSelectedZipBtn" type="button" class="ghost" data-disabled-reason="选择元素后可下载 ZIP" disabled>下载选中 ZIP</button>
+                <button id="downloadZipBtn" type="button" class="ghost" data-disabled-reason="识别到元素后可下载全部 ZIP" disabled>下载全部 ZIP</button>
               </div>
             </div>
             <div id="elementGrid" class="element-grid"></div>
@@ -237,9 +237,9 @@
                 <option value="illustration">高级：色块拆分</option>
               </select>
             </label>
-            <button id="processBtn" type="button" disabled>开始自动抠图</button>
+            <button id="processBtn" type="button" data-disabled-reason="请先上传或载入一张图片" disabled>开始自动抠图</button>
             <button id="cancelBtn" type="button" class="ghost danger-lite" hidden>取消处理</button>
-            <button id="rescanBtn" type="button" class="ghost" disabled>重新识别元素</button>
+            <button id="rescanBtn" type="button" class="ghost" data-disabled-reason="抠图完成后可重新识别元素" disabled>重新识别元素</button>
             <details class="advanced">
               <summary>高级设置</summary>
               <label>
@@ -330,9 +330,9 @@
               </select>
             </label>
             <div class="segment" role="group" aria-label="导出格式">
-              <button type="button" class="format-segment active" data-format="png">PNG</button>
-              <button type="button" class="format-segment" data-format="webp">WebP</button>
-              <button type="button" class="format-segment" data-format="svg">SVG</button>
+              <button type="button" class="format-segment active" aria-pressed="true" data-format="png">PNG</button>
+              <button type="button" class="format-segment" aria-pressed="false" data-format="webp">WebP</button>
+              <button type="button" class="format-segment" aria-pressed="false" data-format="svg">SVG</button>
             </div>
             <label>
               导出倍数
@@ -386,7 +386,7 @@
                 </span>
               </label>
             </details>
-            <button id="downloadBatchZipBtn" type="button" class="ghost" disabled>批量处理并下载 ZIP</button>
+            <button id="downloadBatchZipBtn" type="button" class="ghost" data-disabled-reason="队列中有图片后可批量处理" disabled>批量处理并下载 ZIP</button>
           </section>
 
           <section class="panel-block manual-panel is-muted">
@@ -409,16 +409,16 @@
               <span>当前切片预览</span>
               <canvas id="manualPreviewCanvas"></canvas>
             </div>
-            <button id="manualModeBtn" type="button" class="ghost" disabled>开启框选</button>
-            <button id="exportSelectionBtn" type="button" class="ghost" disabled>导出当前框选</button>
-            <button id="addSelectionBtn" type="button" class="ghost" disabled>保存为新元素</button>
-            <button id="applySelectionBtn" type="button" class="ghost" disabled>更新选中元素</button>
+            <button id="manualModeBtn" type="button" class="ghost" data-disabled-reason="抠图完成后可开启框选" disabled>开启框选</button>
+            <button id="exportSelectionBtn" type="button" class="ghost" data-disabled-reason="框选有效区域后可导出" disabled>导出当前框选</button>
+            <button id="addSelectionBtn" type="button" class="ghost" data-disabled-reason="框选有效区域后可保存为新元素" disabled>保存为新元素</button>
+            <button id="applySelectionBtn" type="button" class="ghost" data-disabled-reason="选中一个元素并框选后可更新" disabled>更新选中元素</button>
           </section>
         </aside>
       </section>
 
       <div class="mobile-action-bar">
-        <button id="mobilePrimaryBtn" type="button" disabled>选择图片开始</button>
+        <button id="mobilePrimaryBtn" type="button" data-disabled-reason="请先上传或载入一张图片" disabled>选择图片开始</button>
       </div>
     </main>
 

@@ -74,6 +74,16 @@ button:disabled {
   opacity: 0.48;
 }
 
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+summary:focus-visible,
+.primary:focus-within,
+.background-color-label:focus-within {
+  outline: 3px solid rgba(52, 199, 134, 0.28);
+  outline-offset: 3px;
+}
+
 .primary,
 #processBtn,
 #mobilePrimaryBtn {
@@ -749,7 +759,8 @@ output {
   color: var(--muted);
 }
 
-.format-segment.active {
+.format-segment.active,
+.format-segment[aria-pressed="true"] {
   background: var(--accent);
   color: #ffffff;
 }
@@ -931,11 +942,17 @@ output {
 }
 
 .preview-toggle.active,
+.preview-toggle[aria-selected="true"],
 .background-toggle.active,
+.background-toggle[aria-pressed="true"],
 .background-color-label:focus-within {
   border-color: var(--accent);
   color: #13764d;
   background: var(--accent-soft);
+}
+
+.preview-toggle[role="tab"] {
+  outline-offset: 2px;
 }
 
 .background-color-label {

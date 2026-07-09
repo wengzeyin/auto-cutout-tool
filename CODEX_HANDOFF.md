@@ -9,10 +9,12 @@ This file is for continuing the project from another Codex thread or device.
 - Local-only commits not pushed yet:
   - `8da0f03 Improve split QA and Windows runner portability`
   - `Refine result-first UI workbench`
-  - current `HEAD`: `Improve processing states and mobile flow`
+  - `Improve processing states and mobile flow`
+  - current `HEAD`: `Improve preview controls accessibility`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
+- The fourth commit completes Stage 3 of the UI pass with accessible preview controls and keyboard navigation.
 
 ## Product Direction
 
@@ -53,12 +55,14 @@ Target: move the app from a parameter-heavy technical page to a result-first des
 - Committed locally as `Improve processing states and mobile flow`.
 - Browser verification in the in-app browser was blocked by localhost URL policy; automatic QA and static checks passed.
 
-### Stage 3: P1 Controls and Accessibility
+### Stage 3: P1 Controls and Accessibility - Done
 
 - Convert preview controls into accessible tabs.
 - Add keyboard handling for preview tabs.
 - Improve focus rings and disabled button explanations.
-- Commit after local validation.
+- Added `aria-selected`, `aria-pressed`, roving tab focus, arrow/Home/End keyboard handling, and disabled button hints.
+- Committed locally as `Improve preview controls accessibility`.
+- Browser verification in the in-app browser was still blocked by localhost URL policy; automatic QA and static checks passed.
 
 ### Stage 4: P1 Asset Panel
 

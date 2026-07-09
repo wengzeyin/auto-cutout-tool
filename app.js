@@ -139,6 +139,7 @@ bindEvents();
 updateDownloadLabels();
 syncFormatSegments();
 setPreviewBackground("checker");
+setPreviewMode(state.previewMode);
 updateUiState();
 renderQueue();
 
@@ -169,6 +170,7 @@ function updateUiState() {
   if (!hasImage) els.mobilePrimaryBtn.textContent = "选择图片开始";
   else if (!hasResult) els.mobilePrimaryBtn.textContent = "开始自动抠图";
   else els.mobilePrimaryBtn.textContent = `导出 ${getExportSettings().label}`;
+  updateDisabledHints();
 }
 
 function updateStatusStage(stage) {
@@ -197,8 +199,12 @@ function setPreviewMode(mode) {
   state.previewMode = mode === "result" ? "result" : "split";
   els.previewArea.classList.toggle("preview-result", state.previewMode === "result");
   els.previewArea.classList.toggle("preview-split", state.previewMode !== "result");
+  els.previewArea.setAttribute("aria-labelledby", state.previewMode === "result" ? "previewTabResult" : "previewTabSplit");
   for (const toggle of els.previewToggles) {
-    toggle.classList.toggle("active", toggle.dataset.preview === state.previewMode);
+    const isActive = toggle.dataset.preview === state.previewMode;
+    toggle.classList.toggle("active", isActive);
+    toggle.setAttribute("aria-selected", String(isActive));
+    toggle.tabIndex = isActive ? 0 : -1;
   }
 }
 
@@ -210,14 +216,50 @@ function setPreviewBackground(mode) {
   resultCard?.classList.add(`bg-${state.previewBackground}`);
   resultCard?.style.setProperty("--preview-bg-color", els.previewBgColor.value || "#34c786");
   for (const toggle of els.backgroundToggles) {
-    toggle.classList.toggle("active", toggle.dataset.bg === state.previewBackground);
+    const isActive = toggle.dataset.bg === state.previewBackground;
+    toggle.classList.toggle("active", isActive);
+    toggle.setAttribute("aria-pressed", String(isActive));
   }
 }
 
 function syncFormatSegments() {
   const { ext } = getExportSettings();
   for (const segment of els.formatSegments) {
-    segment.classList.toggle("active", segment.dataset.format === ext);
+    const isActive = segment.dataset.format === ext;
+    segment.classList.toggle("active", isActive);
+    segment.setAttribute("aria-pressed", String(isActive));
+  }
+}
+
+function moveChoiceByKey(event, buttons, activate, valueAttr) {
+  const keys = ["ArrowLeft", "ArrowUp", "ArrowRight", "ArrowDown", "Home", "End"];
+  if (!keys.includes(event.key)) return;
+  const enabledButtons = buttons.filter((button) => !button.disabled);
+  if (!enabledButtons.length) return;
+
+  event.preventDefault();
+  const currentIndex = Math.max(0, enabledButtons.indexOf(event.currentTarget));
+  let nextIndex = currentIndex;
+  if (event.key === "ArrowRight" || event.key === "ArrowDown") nextIndex = (currentIndex + 1) % enabledButtons.length;
+  if (event.key === "ArrowLeft" || event.key === "ArrowUp") nextIndex = (currentIndex - 1 + enabledButtons.length) % enabledButtons.length;
+  if (event.key === "Home") nextIndex = 0;
+  if (event.key === "End") nextIndex = enabledButtons.length - 1;
+
+  const nextButton = enabledButtons[nextIndex];
+  activate(nextButton.dataset[valueAttr]);
+  nextButton.focus();
+}
+
+function updateDisabledHints() {
+  for (const button of document.querySelectorAll("button[data-disabled-reason]")) {
+    const reason = button.dataset.disabledReason || "";
+    if (button.disabled && reason) {
+      button.title = reason;
+      button.setAttribute("aria-label", `${button.textContent.trim()}，${reason}`);
+    } else {
+      button.removeAttribute("title");
+      button.removeAttribute("aria-label");
+    }
   }
 }
 
@@ -298,12 +340,24 @@ function bindEvents() {
       els.formatSelect.value = segment.dataset.format;
       els.formatSelect.dispatchEvent(new Event("change"));
     });
+    segment.addEventListener("keydown", (event) => {
+      moveChoiceByKey(event, els.formatSegments, (format) => {
+        els.formatSelect.value = format;
+        els.formatSelect.dispatchEvent(new Event("change"));
+      }, "format");
+    });
   }
   for (const toggle of els.previewToggles) {
     toggle.addEventListener("click", () => setPreviewMode(toggle.dataset.preview));
+    toggle.addEventListener("keydown", (event) => {
+      moveChoiceByKey(event, els.previewToggles, setPreviewMode, "preview");
+    });
   }
   for (const toggle of els.backgroundToggles) {
     toggle.addEventListener("click", () => setPreviewBackground(toggle.dataset.bg));
+    toggle.addEventListener("keydown", (event) => {
+      moveChoiceByKey(event, els.backgroundToggles, setPreviewBackground, "bg");
+    });
   }
   els.previewBgColor.addEventListener("input", () => setPreviewBackground("color"));
 
