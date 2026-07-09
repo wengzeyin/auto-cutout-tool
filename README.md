@@ -39,11 +39,13 @@ http://localhost:4173
 /Users/wzy/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node qa/test-multi-split.mjs
 /Users/wzy/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node qa/test-svg-vector.mjs
 /Users/wzy/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node qa/test-validate-report.mjs
+/Users/wzy/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node qa/test-compare-report.mjs
 /Users/wzy/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node qa/test-runner-health.mjs
 /Users/wzy/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node qa/test-summary-risk.mjs
 ```
 
 其中 `qa/test-svg-vector.mjs` 同时覆盖两类 SVG 风险：扁平插画的精准模式必须保留平滑曲线和线稿；照片/毛发类的自动模式必须降噪、合并微小色块，避免导出上千条碎路径。
+`qa/test-compare-report.mjs` 会验证 QA 报告对比门禁，避免算法改动让某张图的 matte、元素拆分、SVG 或关键风险指标静默退步。
 `qa/test-runner-health.mjs` 会验证完整 QA runner 使用的健康检查 token，避免端口被旧服务占用时误连旧页面。
 `qa/test-summary-risk.mjs` 会验证 QA summary 的风险统计口径，避免商品高光、透明材质或低于门禁阈值的指标被误报成风险。
 
@@ -58,6 +60,14 @@ http://localhost:4173
 ```bash
 /Users/wzy/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node qa/validate-report.mjs path/to/qa-report.json
 ```
+
+如果要比较两次算法修改前后的完整 QA 报告，运行：
+
+```bash
+/Users/wzy/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node qa/compare-report.mjs path/to/baseline-qa-report.json path/to/candidate-qa-report.json
+```
+
+对比门禁会按测试图片匹配，拦截平均分下降、单图核心分下降、风险指标新增，以及 `edgeJaggednessScore`、`semiTransparentCoreRatio`、`lineArtLossRatio`、`lightRegionLossRatio`、`whiteFringeRatio`、`svgCommandDensity` 等关键指标回退；同时也会输出具体改善项，方便判断一次算法修改是否值得保留。
 
 也可以直接运行浏览器端完整 QA，脚本会启动本地服务、加载 15 张测试图、批量导出 ZIP，并自动校验 `qa-report.json`：
 

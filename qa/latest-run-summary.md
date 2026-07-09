@@ -1,6 +1,6 @@
 # QA Run Summary
 
-Run time: 2026-07-09 15:24 Asia/Shanghai
+Run time: 2026-07-09 15:38 Asia/Shanghai
 
 Mode: mixed QA scenarios
 Export format: PNG / WebP / SVG validation
@@ -19,7 +19,7 @@ Export scale: 1x baseline with size checks
 - Line art risk: 0
 - Light region risk: 0
 - Semi-transparent core risk: 0
-- ZIP: `qa/run-output/cutout-batch-20260709-1524.zip`
+- ZIP: `qa/run-output/cutout-batch-20260709-1538.zip`
 - Raw report: `qa/run-output/qa-report.latest.json`
 
 ## Per Image Metrics
@@ -45,8 +45,8 @@ Export scale: 1x baseline with size checks
 ## Findings
 
 - Full 15-image QA regression passed with average score 4.7883.
-- Browser QA runner now waits for DOM readiness and the QA sample button instead of `networkidle`, reducing false failures from long-running model/CDN/cache network activity.
-- Runner navigation retries once before failing, which addresses transient page-load hiccups seen during regression runs.
+- QA report comparison gate is now available via `qa/compare-report.mjs`, so future algorithm runs can compare candidate reports against a baseline and fail on silent matte, component, SVG, or risk-metric regressions.
+- The comparison gate also reports improvements, making it easier to decide whether a matte, split, or SVG change is worth keeping before pushing.
 - The QA report still shows no large-box, small-element, SVG blocky, line-art, light-region, or semi-transparent core release risks.
 - Current algorithmic limiting cases remain: photo-like semi-transparent core on curly/short fur and complex-background person, product edge jaggedness, and small-detail sticker matte edge quality.
 
