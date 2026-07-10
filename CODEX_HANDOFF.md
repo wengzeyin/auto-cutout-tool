@@ -6,13 +6,15 @@ This file is for continuing the project from another Codex thread or device.
 
 - Repo: `wengzeyin/auto-cutout-tool`
 - Branch: `main`
-- Local-only commits not pushed yet:
+- Pushed commits through `Polish UI icons and motion`:
   - `8da0f03 Improve split QA and Windows runner portability`
   - `Refine result-first UI workbench`
   - `Improve processing states and mobile flow`
   - `Improve preview controls accessibility`
   - `Upgrade element asset panel`
-  - current `HEAD`: `Polish UI icons and motion`
+  - `Polish UI icons and motion`
+- Current local algorithm work:
+  - `Improve transparent material type detection`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -22,9 +24,7 @@ This file is for continuing the project from another Codex thread or device.
 
 ## Product Direction
 
-Next work is UI/UX only. Do not change the core cutout, element detection, or SVG algorithms unless explicitly requested.
-
-Target: move the app from a parameter-heavy technical page to a result-first design workbench.
+UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimization, especially image type routing, matte protection, multi-element splitting, SVG quality, and QA regression coverage.
 
 ## Already Implemented Before UI Pass
 
@@ -38,6 +38,14 @@ Target: move the app from a parameter-heavy technical page to a result-first des
 - QA asset set and QA reports
 - QA validation and comparison scripts
 - Recent split improvement for opaque subjects on low-alpha platforms
+
+## Algorithm Continuation
+
+### Transparent Material Detection - Done
+
+- Added automatic `transparentMaterial` imageType detection for white-background, low-saturation, cool translucent subjects with highlight and soft-shadow cues.
+- Added `transparent-glass-on-white` regression coverage in `qa/test-image-type.mjs`.
+- Confirmed existing product, line-art, sticker, illustration, and photo image type cases still pass.
 
 ## UI Pass Plan
 

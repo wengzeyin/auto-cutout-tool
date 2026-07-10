@@ -60,6 +60,19 @@ const cases = [
       }
     },
   },
+  {
+    name: "transparent-glass-on-white",
+    expected: "transparentMaterial",
+    draw: (img) => {
+      fill(img, [250, 250, 250, 255]);
+      ellipse(img, 150, 96, 58, 70, [190, 229, 240, 255]);
+      ellipse(img, 150, 98, 42, 54, [224, 244, 248, 255]);
+      rect(img, 112, 48, 76, 10, [248, 252, 253, 255]);
+      rect(img, 106, 142, 88, 12, [158, 174, 178, 255]);
+      ellipse(img, 150, 154, 64, 15, [166, 180, 184, 255]);
+      softNoise(img, 92, 30, 116, 136, 10);
+    },
+  },
 ];
 
 const failures = [];
@@ -155,6 +168,9 @@ function analyzeImageType(imageData) {
   let darkForeground = 0;
   let saturatedForeground = 0;
   let lightColoredForeground = 0;
+  let coolTranslucentForeground = 0;
+  let softSpecularForeground = 0;
+  let softShadowForeground = 0;
   let saturated = 0;
   let lowSaturation = 0;
   let edgeHits = 0;
@@ -179,6 +195,14 @@ function analyzeImageType(imageData) {
         if (metrics.lightness < 96) darkForeground += 1;
         if (metrics.saturation > 0.32) saturatedForeground += 1;
         if (metrics.lightness > 168 && metrics.lightness < 246 && metrics.saturation > 0.045) lightColoredForeground += 1;
+        if (
+          metrics.lightness > 145 &&
+          metrics.lightness < 238 &&
+          metrics.saturation < 0.28 &&
+          (blue - red > 12 || green - red > 12)
+        ) coolTranslucentForeground += 1;
+        if (metrics.lightness > 218 && metrics.lightness < 248 && metrics.saturation < 0.22) softSpecularForeground += 1;
+        if (metrics.lightness > 108 && metrics.lightness < 192 && metrics.saturation < 0.18) softShadowForeground += 1;
       }
       if (metrics.saturation > 0.38) saturated += 1;
       if (metrics.saturation < 0.12) lowSaturation += 1;
@@ -198,6 +222,9 @@ function analyzeImageType(imageData) {
   const darkForegroundRatio = darkForeground / Math.max(1, foreground);
   const saturatedForegroundRatio = saturatedForeground / Math.max(1, foreground);
   const lightColoredForegroundRatio = lightColoredForeground / Math.max(1, foreground);
+  const coolTranslucentForegroundRatio = coolTranslucentForeground / Math.max(1, foreground);
+  const softSpecularForegroundRatio = softSpecularForeground / Math.max(1, foreground);
+  const softShadowForegroundRatio = softShadowForeground / Math.max(1, foreground);
   const saturatedRatio = saturated / samples;
   const lowSatRatio = lowSaturation / samples;
   const edgeRatio = edgeHits / samples;
@@ -209,6 +236,9 @@ function analyzeImageType(imageData) {
     darkForegroundRatio: round(darkForegroundRatio),
     saturatedForegroundRatio: round(saturatedForegroundRatio),
     lightColoredForegroundRatio: round(lightColoredForegroundRatio),
+    coolTranslucentForegroundRatio: round(coolTranslucentForegroundRatio),
+    softSpecularForegroundRatio: round(softSpecularForegroundRatio),
+    softShadowForegroundRatio: round(softShadowForegroundRatio),
     saturatedRatio: round(saturatedRatio),
     lowSatRatio: round(lowSatRatio),
     edgeRatio: round(edgeRatio),
@@ -231,6 +261,16 @@ function analyzeImageType(imageData) {
     uniqueRatio < 0.3 &&
     (saturatedForegroundRatio > 0.35 || (saturatedForegroundRatio > 0.18 && lightColoredForegroundRatio > 0.18))
   ) return "sticker";
+  if (
+    whiteRatio > 0.34 &&
+    foregroundRatio > 0.055 &&
+    foregroundRatio < 0.5 &&
+    lowSatRatio > 0.54 &&
+    saturatedForegroundRatio < 0.2 &&
+    coolTranslucentForegroundRatio > 0.24 &&
+    softSpecularForegroundRatio > 0.08 &&
+    softShadowForegroundRatio > 0.06
+  ) return "transparentMaterial";
   if (
     whiteRatio > 0.38 &&
     foregroundRatio > 0.035 &&
