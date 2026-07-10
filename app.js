@@ -764,14 +764,14 @@ function buildMatteProfile(base, imageType = "unknown") {
     profile.cleanup = Math.max(8, Math.round(profile.cleanup * 0.62));
     profile.residueThreshold = Math.max(6, Math.round(profile.cleanup * 0.58));
     profile.edgeLow = Math.max(5, Math.round(profile.cleanup * 0.45));
-    profile.coreThreshold = profile.fidelity === "clean" ? 208 : profile.fidelity === "preserve" ? 248 : 232;
-    profile.solidThreshold = profile.coreThreshold;
+    profile.coreThreshold = profile.fidelity === "clean" ? 218 : profile.fidelity === "preserve" ? 252 : 242;
+    profile.solidThreshold = profile.fidelity === "clean" ? 244 : 252;
     profile.midBoost = profile.fidelity === "clean" ? 0.98 : 0.86;
     profile.preserveLightRegions = true;
     profile.despeckleStrength = 0.35;
-    profile.alphaNormalizedThreshold = 168;
-    profile.coreNormalizeThreshold = profile.fidelity === "clean" ? 150 : 176;
-    profile.coreNeighborThreshold = 210;
+    profile.alphaNormalizedThreshold = 256;
+    profile.coreNormalizeThreshold = 0;
+    profile.coreNeighborThreshold = 255;
   } else if (type === "product") {
     profile.cleanup = Math.max(profile.cleanup, profile.fidelity === "preserve" ? 20 : 28);
     profile.residueThreshold = profile.cleanup;
@@ -1619,7 +1619,7 @@ function refineCutoutAlpha(sourceCanvas, settings) {
     }
     if (
       alpha > solidThreshold
-      || (alphaNormalized && alpha > (settings.alphaNormalizedThreshold ?? 120))
+      || (settings.imageType !== "transparentMaterial" && alphaNormalized && alpha > (settings.alphaNormalizedThreshold ?? 120))
       || shouldNormalizeCoreAlpha(alphaSource, imageData.width, imageData.height, index / 4, alpha, settings)
     ) {
       data[index + 3] = 255;
@@ -1802,6 +1802,7 @@ function normalizeSemiOpaqueCore(imageData, settings) {
 }
 
 function shouldNormalizeCoreAlpha(alphaSource, width, height, pixelIndex, alpha, settings) {
+  if (settings.imageType === "transparentMaterial") return false;
   const threshold = Number(settings.coreNormalizeThreshold || 0);
   if (!threshold || alpha < threshold) return false;
   const x = pixelIndex % width;

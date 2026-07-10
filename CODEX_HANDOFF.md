@@ -15,6 +15,7 @@ This file is for continuing the project from another Codex thread or device.
   - `Polish UI icons and motion`
 - Current local algorithm work:
   - `Improve transparent material type detection`
+  - `Protect transparent material matte`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -46,6 +47,13 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - Added automatic `transparentMaterial` imageType detection for white-background, low-saturation, cool translucent subjects with highlight and soft-shadow cues.
 - Added `transparent-glass-on-white` regression coverage in `qa/test-image-type.mjs`.
 - Confirmed existing product, line-art, sticker, illustration, and photo image type cases still pass.
+
+### Transparent Material Matte Protection - Done
+
+- Raised transparent material solid/core thresholds so translucent glass-like regions are not forced opaque.
+- Disabled core alpha normalization for `transparentMaterial` in both the main thread and matte worker paths.
+- Added matte regression coverage for semi-transparent glass core, highlight, and soft edge preservation in `qa/test-matte-refine.mjs`.
+- Confirmed lightweight QA still passes across matte, image type, multi-split, SVG, report validation, report comparison, runner health, and summary risk checks.
 
 ## UI Pass Plan
 

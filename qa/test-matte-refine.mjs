@@ -240,7 +240,11 @@ function refineAlpha(image, settings) {
       data[index + 3] = 0;
       continue;
     }
-    if (alpha > solidThreshold || alpha > 120) {
+    if (
+      alpha > solidThreshold
+      || (settings.imageType !== "transparentMaterial" && alpha > (settings.alphaNormalizedThreshold ?? 120))
+      || shouldNormalizeCoreAlphaLocal(image, index / 4, alpha, settings)
+    ) {
       data[index + 3] = 255;
       continue;
     }
@@ -254,6 +258,17 @@ function refineAlpha(image, settings) {
   antiAliasHardEdges(image, settings);
   suppressWhiteFringeAlpha(image, settings);
   return image;
+}
+
+function shouldNormalizeCoreAlphaLocal(image, pixelIndex, alpha, settings) {
+  if (settings.imageType === "transparentMaterial") return false;
+  const threshold = Number(settings.coreNormalizeThreshold || 0);
+  if (!threshold || alpha < threshold) return false;
+  const alphaSource = new Uint8ClampedArray(image.data.length / 4);
+  for (let index = 0; index < alphaSource.length; index += 1) alphaSource[index] = image.data[index * 4 + 3];
+  const x = pixelIndex % width;
+  const y = Math.floor(pixelIndex / width);
+  return hasStrongAlphaNeighbor(alphaSource, x, y, 2, Number(settings.coreNeighborThreshold || 176), 3);
 }
 
 function guidedSmoothEdgeAlpha(image, settings = {}) {
@@ -823,6 +838,29 @@ fillRect(semiCoreBefore, 72, 24, 88, 36, [80, 120, 160, 118]);
 const semiCoreAfter = makeImageData([255, 255, 255, 0]);
 semiCoreAfter.data.set(semiCoreBefore.data);
 normalizeSemiOpaqueCore(semiCoreAfter, { postCoreNormalizeThreshold: 88, postCoreNeighborThreshold: 144, postCoreNeighborCount: 4, postCoreNormalizePasses: 3 });
+const glassBefore = makeImageData([255, 255, 255, 0]);
+const glassCore = [];
+const glassHighlight = [];
+const glassEdge = [];
+fillEllipse(glassBefore, 80, 58, 32, 30, [214, 238, 246, 116], glassCore);
+fillEllipse(glassBefore, 68, 48, 8, 12, [246, 252, 255, 184], glassHighlight);
+fillEllipse(glassBefore, 80, 58, 38, 36, [210, 236, 246, 42], glassEdge);
+fillEllipse(glassBefore, 80, 58, 32, 30, [214, 238, 246, 116], glassCore);
+fillEllipse(glassBefore, 68, 48, 8, 12, [246, 252, 255, 184], glassHighlight);
+const glassAfter = makeImageData([255, 255, 255, 0]);
+glassAfter.data.set(glassBefore.data);
+refineAlpha(glassAfter, {
+  cleanup: 12,
+  residueThreshold: 6,
+  edgeLow: 5,
+  coreThreshold: 242,
+  solidThreshold: 252,
+  midBoost: 0.86,
+  alphaNormalizedThreshold: 256,
+  coreNormalizeThreshold: 0,
+  fidelity: "balanced",
+  imageType: "transparentMaterial",
+});
 const metrics = {
   coreAlpha: averageAlpha(restored.image, core),
   lightAlpha: averageAlpha(restored.image, lightFace),
@@ -848,6 +886,10 @@ const metrics = {
   semiCoreBefore: averageAlphaInRect(semiCoreBefore, 28, 28, 36, 36),
   semiCoreAfter: averageAlphaInRect(semiCoreAfter, 28, 28, 36, 36),
   semiEdgeAfter: averageAlphaInRect(semiCoreAfter, 72, 24, 88, 36),
+  glassCoreBefore: averageAlpha(glassBefore, glassCore),
+  glassCoreAfter: averageAlpha(glassAfter, glassCore),
+  glassHighlightAfter: averageAlpha(glassAfter, glassHighlight),
+  glassEdgeAfter: averageAlpha(glassAfter, glassEdge),
   residueAlpha: residueAlpha(restored.image, backgroundResidue),
   restoredPixels: restored.restoredPixels,
   fallbackAccepted: shouldUseFallbackMatte(
@@ -879,6 +921,10 @@ if (metrics.lowAlphaStickerFringeAfter > 1) failures.push(`low alpha sticker fri
 if (metrics.lowAlphaStickerInteriorAfter < metrics.lowAlphaStickerInteriorBefore * 0.7) failures.push(`interior white sticker detail over-cleared: ${metrics.lowAlphaStickerInteriorBefore.toFixed(1)} -> ${metrics.lowAlphaStickerInteriorAfter.toFixed(1)}`);
 if (metrics.semiCoreAfter < 250) failures.push(`semi-transparent core not normalized: ${metrics.semiCoreBefore.toFixed(1)} -> ${metrics.semiCoreAfter.toFixed(1)}`);
 if (metrics.semiEdgeAfter > 145) failures.push(`isolated semi-transparent edge was over-normalized: ${metrics.semiEdgeAfter.toFixed(1)}`);
+if (metrics.glassCoreAfter > 238) failures.push(`transparent material core over-normalized: ${metrics.glassCoreBefore.toFixed(1)} -> ${metrics.glassCoreAfter.toFixed(1)}`);
+if (metrics.glassCoreAfter < metrics.glassCoreBefore * 0.5) failures.push(`transparent material core over-cleared: ${metrics.glassCoreBefore.toFixed(1)} -> ${metrics.glassCoreAfter.toFixed(1)}`);
+if (metrics.glassHighlightAfter < 150) failures.push(`transparent material highlight lost: ${metrics.glassHighlightAfter.toFixed(1)}`);
+if (metrics.glassEdgeAfter < 20 || metrics.glassEdgeAfter > 190) failures.push(`transparent material edge alpha out of range: ${metrics.glassEdgeAfter.toFixed(1)}`);
 if (metrics.residueAlpha > 1) failures.push(`background residue remains: ${metrics.residueAlpha.toFixed(1)}`);
 if (metrics.restoredPixels < 100) failures.push(`restored pixel count too low: ${metrics.restoredPixels}`);
 if (metrics.fallbackAccepted) failures.push("fallback decision accepted a worse white-fringe result");

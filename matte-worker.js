@@ -34,7 +34,7 @@ function refineImageData(imageData, settings) {
     }
     if (
       alpha > solidThreshold
-      || (alphaNormalized && alpha > (settings.alphaNormalizedThreshold ?? 120))
+      || (settings.imageType !== "transparentMaterial" && alphaNormalized && alpha > (settings.alphaNormalizedThreshold ?? 120))
       || shouldNormalizeCoreAlpha(alphaSource, imageData.width, imageData.height, index / 4, alpha, settings)
     ) {
       data[index + 3] = 255;
@@ -262,6 +262,7 @@ function normalizeSemiOpaqueCore(imageData, settings) {
 }
 
 function shouldNormalizeCoreAlpha(alphaSource, width, height, pixelIndex, alpha, settings) {
+  if (settings.imageType === "transparentMaterial") return false;
   const threshold = Number(settings.coreNormalizeThreshold || 0);
   if (!threshold || alpha < threshold) return false;
   const x = pixelIndex % width;
