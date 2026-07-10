@@ -3020,7 +3020,8 @@ function splitByProjection(component, imageData, coreMask, axis, minCoreArea, pa
     if (keepMultiObjectComponent(child, width * height, minCoreArea)) children.push(child);
   }
 
-  return children.length >= 2 ? children : [];
+  if (children.length < 2) return [];
+  return hasProjectionValleyBetweenChildren(children, component, imageData, axis, settings) ? children : [];
 }
 
 function splitByProjectionPeaks(component, imageData, coreMask, axis, minCoreArea, pad, settings) {
@@ -3099,6 +3100,7 @@ function splitByProjectionPeaks(component, imageData, coreMask, axis, minCoreAre
 
   const children = componentsFromProjectionRanges(ranges, axis, { startX, startY, endX, endY }, imageData, coreMask, minCoreArea, pad, settings);
   if (children.length < 2) return [];
+  if (!hasProjectionValleyBetweenChildren(children, component, imageData, axis, settings)) return [];
 
   const parentDensity = measureComponent(component, imageData, Math.max(24, settings.supportBase)).alphaDensity;
   const childDensity = children.reduce((sum, child) => sum + child.alphaDensity, 0) / children.length;
@@ -3163,6 +3165,7 @@ function splitByProjectionValleys(component, imageData, coreMask, axis, minCoreA
 
   const children = componentsFromProjectionRanges(ranges, axis, { startX, startY, endX, endY }, imageData, coreMask, minCoreArea, pad, settings);
   if (children.length < 2) return [];
+  if (!hasProjectionValleyBetweenChildren(children, component, imageData, axis, settings)) return [];
   const parentDensity = measureComponent(component, imageData, Math.max(24, settings.supportBase)).alphaDensity;
   const childDensity = children.reduce((sum, child) => sum + child.alphaDensity, 0) / children.length;
   return childDensity >= parentDensity * 0.62 ? children : [];
@@ -3214,6 +3217,7 @@ function splitStackedComponent(component, imageData, coreMask, minCoreArea, pad,
   ranges.push([last, length]);
   const children = componentsFromProjectionRanges(ranges, "y", { startX, startY, endX, endY }, imageData, coreMask, minCoreArea, pad, settings);
   if (children.length < 2) return [];
+  if (!hasProjectionValleyBetweenChildren(children, component, imageData, "y", settings)) return [];
   const parentArea = measureComponent(component, imageData, Math.max(24, settings.supportBase)).alphaArea;
   const childArea = children.reduce((sum, child) => sum + child.area, 0);
   return childArea >= parentArea * 0.68 ? children : [];
@@ -3598,6 +3602,7 @@ function forceProjectionSplitAxis(component, imageData, coreMask, axis, minCoreA
   const relaxedSettings = { ...settings, splitPaddingFactor: Math.min(settings.splitPaddingFactor ?? 0.8, 0.65) };
   const children = componentsFromProjectionRanges(ranges, axis, { startX, startY, endX, endY }, imageData, coreMask, minCoreArea, pad, relaxedSettings);
   if (children.length < 2) return [];
+  if (!hasProjectionValleyBetweenChildren(children, component, imageData, axis, settings)) return [];
   const parentArea = Math.max(1, component.area || measureComponent(component, imageData, alphaThreshold).alphaArea);
   const childArea = children.reduce((sum, child) => sum + (child.area || 0), 0);
   if (childArea < parentArea * 0.42) return [];

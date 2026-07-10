@@ -16,6 +16,7 @@ This file is for continuing the project from another Codex thread or device.
 - Current local algorithm work:
   - `Improve transparent material type detection`
   - `Protect transparent material matte`
+  - `Tighten projection split QA`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -53,6 +54,13 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - Raised transparent material solid/core thresholds so translucent glass-like regions are not forced opaque.
 - Disabled core alpha normalization for `transparentMaterial` in both the main thread and matte worker paths.
 - Added matte regression coverage for semi-transparent glass core, highlight, and soft edge preservation in `qa/test-matte-refine.mjs`.
+- Confirmed lightweight QA still passes across matte, image type, multi-split, SVG, report validation, report comparison, runner health, and summary risk checks.
+
+### Projection Split QA and Guardrails - Done
+
+- Tightened projection-based large-box splitting so normal, peak, valley, stacked, and forced projection paths must pass a verified low-density cut between children.
+- Mirrored projection split logic in `qa/test-multi-split.mjs` so the QA path covers the production projection splitter.
+- Added regression cases for clear-gap large-box splitting and continuous strongly connected subjects that must not be projection-split.
 - Confirmed lightweight QA still passes across matte, image type, multi-split, SVG, report validation, report comparison, runner health, and summary risk checks.
 
 ## UI Pass Plan

@@ -128,6 +128,31 @@ const cases = [
     min: 4,
     max: 4,
   },
+  {
+    name: "large-box-projection-split-clear-gaps",
+    draw: (img) => {
+      for (const cx of [185, 450, 715]) {
+        ellipse(img, cx, 155, 58, 72, 255);
+        rect(img, cx - 34, 218, 68, 54, 246);
+        ellipse(img, cx, 286, 72, 18, 46);
+      }
+      rect(img, 96, 286, 708, 18, 34);
+    },
+    min: 3,
+    max: 3,
+  },
+  {
+    name: "continuous-subject-not-projection-split",
+    draw: (img) => {
+      rect(img, 245, 122, 410, 152, 255);
+      ellipse(img, 278, 198, 72, 92, 255);
+      ellipse(img, 622, 198, 72, 92, 255);
+      rect(img, 330, 174, 240, 76, 255);
+      rect(img, 420, 118, 60, 162, 250);
+    },
+    min: 1,
+    max: 1,
+  },
 ];
 
 const failures = [];
@@ -359,6 +384,8 @@ function splitLargeComponent(component, imageData, coreMask, w, h, minCoreArea, 
   if (!largeBySize && !sparseLarge && !hasMultipleCore) return [];
   const ownershipChildren = splitBySeedOwnership(component, imageData, coreChildren, minCoreArea, pad, settings);
   if (ownershipChildren.length >= 2) return ownershipChildren;
+  const projectionChildren = projectionSplit(component, imageData, coreMask, minCoreArea, pad, settings);
+  if (projectionChildren.length >= 2) return projectionChildren;
   const detachedSmallChildren = splitDetachedSmallSeedComponent(component, imageData, coreChildren, minCoreArea, pad, settings);
   if (detachedSmallChildren.length >= 2) return detachedSmallChildren;
   if (!hasMultipleCore || (!sparseLarge && component.alphaDensity > 0.28)) return [];
@@ -501,6 +528,282 @@ function projectionStripDensity(component, data, w, h, axis, cut, alphaThreshold
     }
   }
   return total ? opaque / total : 1;
+}
+
+function projectionSplit(component, imageData, coreMask, minCoreArea, pad, settings) {
+  const vertical = splitByProjection(component, imageData, coreMask, "x", minCoreArea, pad, settings);
+  if (vertical.length >= 2) return vertical;
+  const horizontal = splitByProjection(component, imageData, coreMask, "y", minCoreArea, pad, settings);
+  if (horizontal.length >= 2) return horizontal;
+  const verticalPeaks = splitByProjectionPeaks(component, imageData, coreMask, "x", minCoreArea, pad, settings);
+  if (verticalPeaks.length >= 2) return verticalPeaks;
+  const horizontalPeaks = splitByProjectionPeaks(component, imageData, coreMask, "y", minCoreArea, pad, settings);
+  if (horizontalPeaks.length >= 2) return horizontalPeaks;
+  const verticalValleys = splitByProjectionValleys(component, imageData, coreMask, "x", minCoreArea, pad, settings);
+  if (verticalValleys.length >= 2) return verticalValleys;
+  const horizontalValleys = splitByProjectionValleys(component, imageData, coreMask, "y", minCoreArea, pad, settings);
+  if (horizontalValleys.length >= 2) return horizontalValleys;
+  return splitStackedComponent(component, imageData, coreMask, minCoreArea, pad, settings);
+}
+
+function splitByProjection(component, imageData, coreMask, axis, minCoreArea, pad, settings) {
+  const { width: w, height: h } = imageData;
+  const startX = Math.max(0, Math.floor(component.x));
+  const startY = Math.max(0, Math.floor(component.y));
+  const endX = Math.min(w, Math.ceil(component.x + component.width));
+  const endY = Math.min(h, Math.ceil(component.y + component.height));
+  const length = axis === "x" ? endX - startX : endY - startY;
+  const crossLength = axis === "x" ? endY - startY : endX - startX;
+  if (length < 24 || crossLength < 8) return [];
+
+  const projection = new Array(length).fill(0);
+  for (let y = startY; y < endY; y += 1) {
+    for (let x = startX; x < endX; x += 1) {
+      if (!coreMask[y * w + x]) continue;
+      projection[axis === "x" ? x - startX : y - startY] += 1;
+    }
+  }
+
+  const nonZero = projection.filter(Boolean);
+  if (!nonZero.length) return [];
+  const average = nonZero.reduce((sum, value) => sum + value, 0) / nonZero.length;
+  const threshold = Math.max(1, average * settings.gapDensityRatio);
+  const minGap = Math.max(3, Math.round(length * settings.gapMinRatio));
+  const gaps = [];
+  let gapStart = -1;
+  for (let i = 0; i < projection.length; i += 1) {
+    const isGap = projection[i] <= threshold;
+    if (isGap && gapStart === -1) gapStart = i;
+    if ((!isGap || i === projection.length - 1) && gapStart !== -1) {
+      const gapEnd = isGap && i === projection.length - 1 ? i + 1 : i;
+      if (gapEnd - gapStart >= minGap) gaps.push({ start: gapStart, end: gapEnd });
+      gapStart = -1;
+    }
+  }
+
+  const cuts = gaps
+    .map((gap) => Math.round((gap.start + gap.end) / 2))
+    .filter((cut) => cut > length * 0.08 && cut < length * 0.92);
+  if (!cuts.length) return [];
+
+  const ranges = [];
+  let last = 0;
+  for (const cut of cuts) {
+    ranges.push([last, cut]);
+    last = cut;
+  }
+  ranges.push([last, length]);
+  const children = componentsFromProjectionRanges(ranges, axis, { startX, startY, endX, endY }, imageData, coreMask, minCoreArea, pad, settings);
+  if (children.length < 2) return [];
+  return hasProjectionValleyBetweenChildren(children, component, imageData, axis, settings) ? children : [];
+}
+
+function splitByProjectionPeaks(component, imageData, coreMask, axis, minCoreArea, pad, settings) {
+  const { width: w, height: h } = imageData;
+  const startX = Math.max(0, Math.floor(component.x));
+  const startY = Math.max(0, Math.floor(component.y));
+  const endX = Math.min(w, Math.ceil(component.x + component.width));
+  const endY = Math.min(h, Math.ceil(component.y + component.height));
+  const length = axis === "x" ? endX - startX : endY - startY;
+  const crossLength = axis === "x" ? endY - startY : endX - startX;
+  if (length < 48 || crossLength < 20) return [];
+
+  const projection = new Array(length).fill(0);
+  for (let y = startY; y < endY; y += 1) {
+    for (let x = startX; x < endX; x += 1) {
+      if (!coreMask[y * w + x]) continue;
+      projection[axis === "x" ? x - startX : y - startY] += 1;
+    }
+  }
+
+  const smoothed = smoothProjection(projection, Math.max(2, Math.round(length * 0.012)));
+  const nonZero = smoothed.filter(Boolean);
+  if (!nonZero.length) return [];
+  const max = Math.max(...smoothed);
+  const average = nonZero.reduce((sum, value) => sum + value, 0) / nonZero.length;
+  const peakThreshold = Math.max(2, Math.min(max * 0.38, average * 0.82));
+  const valleyThreshold = Math.max(1, Math.min(max * 0.24, average * settings.valleyDensityRatio));
+  const minRun = Math.max(4, Math.round(length * 0.028));
+  const segments = [];
+  let runStart = -1;
+
+  for (let i = 0; i < smoothed.length; i += 1) {
+    const isPeak = smoothed[i] >= peakThreshold;
+    if (isPeak && runStart === -1) runStart = i;
+    if ((!isPeak || i === smoothed.length - 1) && runStart !== -1) {
+      const runEnd = isPeak && i === smoothed.length - 1 ? i + 1 : i;
+      if (runEnd - runStart >= minRun) segments.push({ start: runStart, end: runEnd });
+      runStart = -1;
+    }
+  }
+  if (segments.length < 2) return [];
+
+  const cuts = [];
+  for (let i = 0; i < segments.length - 1; i += 1) {
+    const left = segments[i];
+    const right = segments[i + 1];
+    if (right.start - left.end < Math.max(2, Math.round(length * 0.006))) continue;
+    let valleyIndex = left.end;
+    let valleyValue = Infinity;
+    for (let cursor = left.end; cursor <= right.start; cursor += 1) {
+      const value = smoothed[cursor] ?? 0;
+      if (value < valleyValue) {
+        valleyValue = value;
+        valleyIndex = cursor;
+      }
+    }
+    const leftPeak = Math.max(...smoothed.slice(left.start, left.end));
+    const rightPeak = Math.max(...smoothed.slice(right.start, right.end));
+    const localPeak = Math.min(leftPeak, rightPeak);
+    if (valleyValue <= valleyThreshold || valleyValue <= localPeak * 0.55) cuts.push(valleyIndex);
+  }
+
+  const uniqueCuts = [...new Set(cuts)].filter((cut) => cut > length * 0.06 && cut < length * 0.94).sort((a, b) => a - b);
+  if (!uniqueCuts.length) return [];
+  const ranges = [];
+  let last = 0;
+  for (const cut of uniqueCuts) {
+    ranges.push([last, cut]);
+    last = cut;
+  }
+  ranges.push([last, length]);
+  const children = componentsFromProjectionRanges(ranges, axis, { startX, startY, endX, endY }, imageData, coreMask, minCoreArea, pad, settings);
+  if (children.length < 2) return [];
+  if (!hasProjectionValleyBetweenChildren(children, component, imageData, axis, settings)) return [];
+  const parentDensity = measureComponent(component, imageData, Math.max(24, settings.supportBase)).alphaDensity;
+  const childDensity = children.reduce((sum, child) => sum + child.alphaDensity, 0) / children.length;
+  return childDensity >= parentDensity * 0.72 ? children : [];
+}
+
+function splitByProjectionValleys(component, imageData, coreMask, axis, minCoreArea, pad, settings) {
+  if ((settings.mergeDistance ?? 4) > 4) return [];
+  const { width: w, height: h } = imageData;
+  const startX = Math.max(0, Math.floor(component.x));
+  const startY = Math.max(0, Math.floor(component.y));
+  const endX = Math.min(w, Math.ceil(component.x + component.width));
+  const endY = Math.min(h, Math.ceil(component.y + component.height));
+  const length = axis === "x" ? endX - startX : endY - startY;
+  const crossLength = axis === "x" ? endY - startY : endX - startX;
+  if (length < 72 || crossLength < 24) return [];
+
+  const projection = new Array(length).fill(0);
+  for (let y = startY; y < endY; y += 1) {
+    for (let x = startX; x < endX; x += 1) {
+      if (!coreMask[y * w + x]) continue;
+      projection[axis === "x" ? x - startX : y - startY] += 1;
+    }
+  }
+
+  const smoothed = smoothProjection(projection, Math.max(3, Math.round(length * 0.018)));
+  const nonZero = smoothed.filter(Boolean);
+  if (nonZero.length < length * 0.38) return [];
+  const max = Math.max(...smoothed);
+  const average = nonZero.reduce((sum, value) => sum + value, 0) / nonZero.length;
+  const window = Math.max(8, Math.round(length * 0.08));
+  const minSeparation = Math.max(18, Math.round(length * 0.18));
+  const candidates = [];
+
+  for (let i = Math.round(length * 0.12); i < length * 0.88; i += 1) {
+    const value = smoothed[i];
+    if (value <= 0 || value > Math.min(max * 0.82, average * 0.92)) continue;
+    const leftPeak = Math.max(...smoothed.slice(Math.max(0, i - window), i));
+    const rightPeak = Math.max(...smoothed.slice(i + 1, Math.min(length, i + window + 1)));
+    const localPeak = Math.min(leftPeak, rightPeak);
+    if (localPeak < Math.max(average * 0.82, max * 0.42)) continue;
+    if (value > localPeak * 0.72 && value > average * 0.7) continue;
+    const neighborhood = smoothed.slice(Math.max(0, i - 3), Math.min(length, i + 4));
+    if (value > Math.min(...neighborhood)) continue;
+    const previous = candidates[candidates.length - 1];
+    if (previous && i - previous.index < minSeparation) {
+      if (value < previous.value) candidates[candidates.length - 1] = { index: i, value };
+    } else {
+      candidates.push({ index: i, value });
+    }
+  }
+
+  const cuts = candidates.map((candidate) => candidate.index);
+  if (!cuts.length) return [];
+  const ranges = [];
+  let last = 0;
+  for (const cut of cuts) {
+    ranges.push([last, cut]);
+    last = cut;
+  }
+  ranges.push([last, length]);
+  const children = componentsFromProjectionRanges(ranges, axis, { startX, startY, endX, endY }, imageData, coreMask, minCoreArea, pad, settings);
+  if (children.length < 2) return [];
+  if (!hasProjectionValleyBetweenChildren(children, component, imageData, axis, settings)) return [];
+  const parentDensity = measureComponent(component, imageData, Math.max(24, settings.supportBase)).alphaDensity;
+  const childDensity = children.reduce((sum, child) => sum + child.alphaDensity, 0) / children.length;
+  return childDensity >= parentDensity * 0.62 ? children : [];
+}
+
+function splitStackedComponent(component, imageData, coreMask, minCoreArea, pad, settings) {
+  if ((settings.mergeDistance ?? 4) > 2) return [];
+  const aspect = component.height / Math.max(1, component.width);
+  if (aspect < 1.85 || component.height < 120) return [];
+  const estimatedParts = clamp(Math.round(aspect), 2, 4);
+  const { width: w, height: h } = imageData;
+  const startX = Math.max(0, Math.floor(component.x));
+  const startY = Math.max(0, Math.floor(component.y));
+  const endX = Math.min(w, Math.ceil(component.x + component.width));
+  const endY = Math.min(h, Math.ceil(component.y + component.height));
+  const length = endY - startY;
+  if (length < 80) return [];
+
+  const projection = new Array(length).fill(0);
+  for (let y = startY; y < endY; y += 1) {
+    for (let x = startX; x < endX; x += 1) {
+      if (coreMask[y * w + x]) projection[y - startY] += 1;
+    }
+  }
+  const smoothed = smoothProjection(projection, Math.max(4, Math.round(length * 0.025)));
+  const cuts = [];
+  const searchRadius = Math.max(14, Math.round(length / estimatedParts * 0.22));
+  for (let part = 1; part < estimatedParts; part += 1) {
+    const target = Math.round((length * part) / estimatedParts);
+    let bestIndex = target;
+    let bestValue = Infinity;
+    for (let cursor = Math.max(8, target - searchRadius); cursor <= Math.min(length - 8, target + searchRadius); cursor += 1) {
+      const value = smoothed[cursor] ?? 0;
+      if (value < bestValue) {
+        bestValue = value;
+        bestIndex = cursor;
+      }
+    }
+    if (!cuts.length || bestIndex - cuts[cuts.length - 1] > length * 0.18) cuts.push(bestIndex);
+  }
+  if (!cuts.length) return [];
+  const ranges = [];
+  let last = 0;
+  for (const cut of cuts) {
+    ranges.push([last, cut]);
+    last = cut;
+  }
+  ranges.push([last, length]);
+  const children = componentsFromProjectionRanges(ranges, "y", { startX, startY, endX, endY }, imageData, coreMask, minCoreArea, pad, settings);
+  if (children.length < 2) return [];
+  if (!hasProjectionValleyBetweenChildren(children, component, imageData, "y", settings)) return [];
+  const parentArea = measureComponent(component, imageData, Math.max(24, settings.supportBase)).alphaArea;
+  const childArea = children.reduce((sum, child) => sum + child.area, 0);
+  return childArea >= parentArea * 0.68 ? children : [];
+}
+
+function smoothProjection(values, radius) {
+  const output = new Array(values.length).fill(0);
+  let sum = 0;
+  for (let i = -radius; i < values.length + radius; i += 1) {
+    const add = i + radius;
+    if (add >= 0 && add < values.length) sum += values[add];
+    const remove = i - radius - 1;
+    if (remove >= 0 && remove < values.length) sum -= values[remove];
+    if (i >= 0 && i < values.length) {
+      const from = Math.max(0, i - radius);
+      const to = Math.min(values.length - 1, i + radius);
+      output[i] = sum / Math.max(1, to - from + 1);
+    }
+  }
+  return output;
 }
 
 function findCoreSeedsInBox(mask, w, h, box, minArea) {
@@ -825,6 +1128,7 @@ function forceProjectionSplitAxis(component, imageData, coreMask, axis, minCoreA
   const relaxedSettings = { ...settings, splitPaddingFactor: Math.min(settings.splitPaddingFactor ?? 0.8, 0.65) };
   const children = componentsFromProjectionRanges(ranges, axis, { startX, startY, endX, endY }, imageData, coreMask, minCoreArea, pad, relaxedSettings);
   if (children.length < 2) return [];
+  if (!hasProjectionValleyBetweenChildren(children, component, imageData, axis, settings)) return [];
   const parentArea = Math.max(1, component.area || measureComponent(component, imageData, alphaThreshold).alphaArea);
   const childArea = children.reduce((sum, child) => sum + (child.area || 0), 0);
   return childArea >= parentArea * 0.42 ? children : [];
