@@ -17,6 +17,7 @@ This file is for continuing the project from another Codex thread or device.
   - `Improve transparent material type detection`
   - `Protect transparent material matte`
   - `Tighten projection split QA`
+  - `Improve precise SVG coordinate fidelity`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -61,6 +62,12 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - Tightened projection-based large-box splitting so normal, peak, valley, stacked, and forced projection paths must pass a verified low-density cut between children.
 - Mirrored projection split logic in `qa/test-multi-split.mjs` so the QA path covers the production projection splitter.
 - Added regression cases for clear-gap large-box splitting and continuous strongly connected subjects that must not be projection-split.
+- Confirmed lightweight QA still passes across matte, image type, multi-split, SVG, report validation, report comparison, runner health, and summary risk checks.
+
+### Precise SVG Coordinate Fidelity - Done
+
+- Increased exported SVG path coordinate precision from 1 decimal to 2 decimals, matching the QA vectorizer and reducing visibly blocky curve output.
+- Added `fractionalCoordinateRatio` coverage in `qa/test-svg-vector.mjs` so precise SVG output must retain subpixel curve coordinates instead of reverting toward pixel-grid paths.
 - Confirmed lightweight QA still passes across matte, image type, multi-split, SVG, report validation, report comparison, runner health, and summary risk checks.
 
 ## UI Pass Plan

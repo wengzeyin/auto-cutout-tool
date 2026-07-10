@@ -6500,7 +6500,7 @@ function perpendicularDistance(point, start, end) {
 }
 
 function roundPathNumber(value) {
-  return Math.round(value * 10) / 10;
+  return Math.round(value * 100) / 100;
 }
 
 function sameVectorPoint(a, b) {

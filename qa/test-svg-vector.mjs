@@ -36,6 +36,7 @@ const commandCount = countSvgPathCommands(paths);
 const visibleArea = [...groups.values()].reduce((sum, group) => sum + group.area, 0);
 const commandDensity = commandCount / Math.max(1, Math.sqrt(visibleArea));
 const gridAlignedRatio = measureGridAlignedCoordinateRatio(paths);
+const fractionalCoordinateRatio = measureFractionalCoordinateRatio(paths);
 const hasCubic = /C/.test(paths);
 const tinyBlueGroup = [...groups.entries()].find(([key, group]) => group.area >= 18 && group.area <= 40 && keyIsBlue(key))?.[1];
 const tinyBlueHasCubic = Boolean(tinyBlueGroup && /C/.test(tinyBlueGroup.path));
@@ -51,6 +52,7 @@ if (hasOpacityGroups) failures.push("Expected precise flat artwork SVG to merge 
 if (commandDensity > 18) failures.push(`Command density ${commandDensity.toFixed(2)} is too high.`);
 if (commandCount > 650) failures.push(`Command count ${commandCount} is too high for simple flat artwork.`);
 if (gridAlignedRatio > 0.58) failures.push(`Expected precise SVG to smooth off the pixel grid, grid-aligned ratio ${gridAlignedRatio.toFixed(2)} is too high.`);
+if (fractionalCoordinateRatio < 0.3) failures.push(`Expected precise SVG to keep subpixel coordinates, fractional ratio ${fractionalCoordinateRatio.toFixed(2)} is too low.`);
 if (tinyRegionCount > 0) failures.push(`Expected isolated speckles to merge away, got ${tinyRegionCount}.`);
 if (!darkGroup || darkGroup.area < 60) failures.push("Expected protected dark line art to remain as a filled path group.");
 
@@ -85,6 +87,7 @@ const result = {
   visibleArea,
   commandDensity: Math.round(commandDensity * 100) / 100,
   gridAlignedRatio: Math.round(gridAlignedRatio * 100) / 100,
+  fractionalCoordinateRatio: Math.round(fractionalCoordinateRatio * 100) / 100,
   tinyRegionCount,
   darkArea: darkGroup?.area || 0,
   tinyBlueHasCubic,
@@ -518,6 +521,13 @@ function measureGridAlignedCoordinateRatio(path) {
   if (!values.length) return 1;
   const aligned = values.filter((value) => Math.abs(value - Math.round(value)) < 0.035).length;
   return aligned / values.length;
+}
+
+function measureFractionalCoordinateRatio(path) {
+  const values = path.match(/-?\d+(?:\.\d+)?/g)?.map(Number) || [];
+  if (!values.length) return 0;
+  const fractional = values.filter((value) => Math.abs(value - Math.round(value)) >= 0.08).length;
+  return fractional / values.length;
 }
 
 function colorMetrics(red, green, blue) {
