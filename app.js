@@ -5110,6 +5110,7 @@ function computeCurrentQaMetrics() {
     svgVisibleArea: svgMetrics.visibleArea,
     svgCommandDensity: roundMetric(svgMetrics.commandDensity),
     svgGridAlignedRatio: roundMetric(svgMetrics.gridAlignedRatio),
+    svgFractionalCoordinateRatio: roundMetric(svgMetrics.fractionalCoordinateRatio),
     svgBlockyRisk: svgMetrics.blockyRisk,
     warnings: matteQuality.warnings || [],
   };
@@ -5258,7 +5259,7 @@ function clampScore(value) {
 }
 
 function estimateSvgMetrics(canvas) {
-  if (!canvas?.width) return { pathCount: 0, commandCount: 0, visibleArea: 0, commandDensity: 0, gridAlignedRatio: 0, blockyRisk: false };
+  if (!canvas?.width) return { pathCount: 0, commandCount: 0, visibleArea: 0, commandDensity: 0, gridAlignedRatio: 0, fractionalCoordinateRatio: 0, blockyRisk: false };
   const vectorSettings = getVectorSettings();
   const source = prepareVectorCanvas(canvas, vectorSettings.maxEdge);
   const ctx = source.getContext("2d", { willReadFrequently: true });
@@ -5267,19 +5268,23 @@ function estimateSvgMetrics(canvas) {
   const summary = [...groups.values()].reduce((acc, group) => {
     const commands = countSvgPathCommands(group.path);
     const gridCounts = measureGridAlignedCoordinateCounts(group.path);
+    const fractionalCounts = measureFractionalCoordinateCounts(group.path);
     acc.pathCount += group.regionCount || 1;
     acc.commandCount += commands;
     acc.visibleArea += group.area || 0;
     acc.gridAlignedValues += gridCounts.aligned;
+    acc.fractionalValues += fractionalCounts.fractional;
     acc.coordinateValues += gridCounts.total;
     return acc;
-  }, { pathCount: 0, commandCount: 0, visibleArea: 0, commandDensity: 0, gridAlignedRatio: 0, gridAlignedValues: 0, coordinateValues: 0, blockyRisk: false });
+  }, { pathCount: 0, commandCount: 0, visibleArea: 0, commandDensity: 0, gridAlignedRatio: 0, fractionalCoordinateRatio: 0, gridAlignedValues: 0, fractionalValues: 0, coordinateValues: 0, blockyRisk: false });
   summary.commandDensity = summary.commandCount / Math.max(1, Math.sqrt(summary.visibleArea));
   summary.gridAlignedRatio = summary.gridAlignedValues / Math.max(1, summary.coordinateValues);
+  summary.fractionalCoordinateRatio = summary.fractionalValues / Math.max(1, summary.coordinateValues);
   summary.blockyRisk = summary.visibleArea > 0 && (
     summary.commandDensity > 18 ||
     (vectorSettings.mode === "precise" && summary.commandDensity > 14 && summary.pathCount > 60) ||
-    (vectorSettings.mode === "precise" && summary.gridAlignedRatio > 0.62 && summary.commandCount > 24)
+    (vectorSettings.mode === "precise" && summary.gridAlignedRatio > 0.62 && summary.commandCount > 24) ||
+    (vectorSettings.mode === "precise" && summary.fractionalCoordinateRatio < 0.24 && summary.commandCount > 24)
   );
   return summary;
 }
@@ -5292,6 +5297,12 @@ function measureGridAlignedCoordinateCounts(path) {
   const values = path.match(/-?\d+(?:\.\d+)?/g)?.map(Number) || [];
   const aligned = values.filter((value) => Math.abs(value - Math.round(value)) < 0.035).length;
   return { aligned, total: values.length };
+}
+
+function measureFractionalCoordinateCounts(path) {
+  const values = path.match(/-?\d+(?:\.\d+)?/g)?.map(Number) || [];
+  const fractional = values.filter((value) => Math.abs(value - Math.round(value)) >= 0.08).length;
+  return { fractional, total: values.length };
 }
 
 function roundMetric(value) {
@@ -5347,6 +5358,7 @@ function generateQaReportHtml(report) {
         <td>${formatMetric(metrics.svgGridAlignedRatio)}</td>
         <td>${svgRisk}</td>
         <td>${escapeHtml([...score.notes || [], warnings || row.error || ""].filter(Boolean).join("；"))}</td>
+        <td>${formatMetric(metrics.svgFractionalCoordinateRatio)}</td>
       </tr>`;
   }).join("");
   return `<!doctype html>
@@ -5377,6 +5389,7 @@ function generateQaReportHtml(report) {
         <th>元素数</th><th>小元素数</th><th>小元素风险</th>
         <th>alphaCoverage</th><th>edgeJaggedness</th><th>semiTransparentCore</th>
         <th>lineArtLoss</th><th>lightRegionLoss</th><th>whiteFringe</th><th>whiteFringePx</th><th>whiteFringeArea</th><th>lowAlphaFringe</th><th>fringeAvgAlpha</th><th>大框风险</th><th>svgPathCount</th><th>svgCommandCount</th><th>svgCommandDensity</th><th>svgGridAligned</th><th>SVG 块状风险</th><th>提示</th>
+        <th>svgFractional</th>
       </tr>
     </thead>
     <tbody>${rows}</tbody>

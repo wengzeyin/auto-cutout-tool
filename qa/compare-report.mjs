@@ -23,6 +23,7 @@ const CONFIG = {
     whiteFringeAreaRatio: { absolute: 0.0005, relative: 0.35, direction: "lower" },
     svgCommandDensity: { absolute: 1.5, relative: 0.35, direction: "lower" },
     svgGridAlignedRatio: { absolute: 0.08, relative: 0.2, direction: "lower" },
+    svgFractionalCoordinateRatio: { absolute: 0.08, relative: 0.2, direction: "higher" },
   },
   improvementMetrics: [
     "edgeJaggednessScore",
@@ -33,6 +34,7 @@ const CONFIG = {
     "whiteFringeAreaRatio",
     "svgCommandDensity",
     "svgGridAlignedRatio",
+    "svgFractionalCoordinateRatio",
   ],
   riskMetrics: [
     "largeBoxRisk",

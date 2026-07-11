@@ -19,6 +19,7 @@ This file is for continuing the project from another Codex thread or device.
   - `Tighten projection split QA`
   - `Improve precise SVG coordinate fidelity`
   - `Protect gray SVG line art`
+  - `Track SVG fractional QA metric`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -76,6 +77,13 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - Expanded SVG line-art protection from only near-black strokes to low-saturation medium-dark strokes, improving editable SVG results for gray/anti-aliased illustration and logo lines.
 - Applied the same protected-line-art logic during color-key stabilization so neighboring regions do not absorb clear gray line strokes.
 - Added `grayLineArea` regression coverage in `qa/test-svg-vector.mjs`.
+- Confirmed lightweight QA still passes across matte, image type, multi-split, SVG, report validation, report comparison, runner health, and summary risk checks.
+
+### SVG Fractional QA Metric - Done
+
+- Added `svgFractionalCoordinateRatio` to generated QA metrics and QA HTML reports so precise SVG paths can be monitored for subpixel curve fidelity.
+- Added a precise-mode blocky-risk condition when fractional SVG coordinates drop too low.
+- Added validation and report-comparison gates for `svgFractionalCoordinateRatio`, including required-field coverage in `qa/validate-report.mjs` and regression detection in `qa/compare-report.mjs`.
 - Confirmed lightweight QA still passes across matte, image type, multi-split, SVG, report validation, report comparison, runner health, and summary risk checks.
 
 ## UI Pass Plan

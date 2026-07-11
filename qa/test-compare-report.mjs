@@ -26,8 +26,11 @@ if (!/improvements/.test(improved.stdout) || !/whiteFringeRatio|averageScore/.te
   failures.push("Expected improved comparison output to include improvements.");
 }
 if (regressed.status === 0) failures.push("Expected regressed report to fail comparison.");
-if (!/largeBoxRisk|averageScore|lineArtLossRatio|elements/.test(regressed.stdout)) {
+if (!/largeBoxRisk|averageScore|lineArtLossRatio|svgFractionalCoordinateRatio|elements/.test(regressed.stdout)) {
   failures.push("Expected regressed comparison output to mention risk, score, metric, or element regression.");
+}
+if (!/svgFractionalCoordinateRatio/.test(regressed.stdout)) {
+  failures.push("Expected regressed comparison output to mention svgFractionalCoordinateRatio.");
 }
 
 const result = {
@@ -70,6 +73,7 @@ function makeReport(kind) {
         svgPathCount: 42,
         svgCommandDensity: 8,
         svgGridAlignedRatio: 0.3,
+        svgFractionalCoordinateRatio: kind === "regressed" ? 0.36 : kind === "improved" ? 0.64 : 0.52,
         svgBlockyRisk: false,
       },
     }),
@@ -94,6 +98,7 @@ function makeReport(kind) {
         svgPathCount: 25,
         svgCommandDensity: 9,
         svgGridAlignedRatio: 0.32,
+        svgFractionalCoordinateRatio: kind === "regressed" ? 0.34 : 0.5,
         svgBlockyRisk: false,
       },
     }),

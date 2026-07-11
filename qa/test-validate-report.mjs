@@ -79,6 +79,7 @@ function makeReport({ fail }) {
       svgPathCount: /插画|图标|贴纸|logo|文字|商品|靠近/.test(scenario) ? 18 : 4,
       svgCommandCount: 160,
       svgCommandDensity: 8.5,
+      svgFractionalCoordinateRatio: 0.52,
       svgBlockyRisk: false,
     };
     if (/透明材质/.test(scenario)) metrics.semiTransparentCoreRatio = 0.82;
@@ -90,6 +91,7 @@ function makeReport({ fail }) {
       delete metrics.lightRegionLossRatio;
       delete metrics.smallComponentCount;
       delete metrics.svgCommandDensity;
+      delete metrics.svgFractionalCoordinateRatio;
     }
     return {
       index: index + 1,

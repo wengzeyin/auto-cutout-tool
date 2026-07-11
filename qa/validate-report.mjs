@@ -64,6 +64,7 @@ for (const row of rows) {
     if (metrics.svgBlockyRisk) failures.push(`${name}: svgBlockyRisk is true.`);
     if (Number(metrics.svgPathCount || 0) <= 0) failures.push(`${name}: svgPathCount is missing or zero.`);
     if (Number(metrics.svgCommandDensity || 0) > 24) failures.push(`${name}: svgCommandDensity ${format(metrics.svgCommandDensity)} is too high.`);
+    if (Number(metrics.svgFractionalCoordinateRatio || 0) < 0.18) failures.push(`${name}: svgFractionalCoordinateRatio ${format(metrics.svgFractionalCoordinateRatio)} is too low.`);
   }
 
   if (/贴纸合集/.test(scenario) && (row.elements || 0) < 6) warnings.push(`${name}: sticker pack produced ${row.elements || 0} elements; target is 6+.`);
@@ -139,7 +140,7 @@ function requiredMetricFieldsForScenario(scenario) {
   if (isMatteCriticalScenario(scenario)) fields.push("whiteFringeRatio");
   if (isIllustrationScenario(scenario)) fields.push("lineArtLossRatio", "lightRegionLossRatio");
   if (isMultiElementScenario(scenario)) fields.push("smallComponentCount", "smallElementRisk");
-  if (isSvgScenario(scenario)) fields.push("svgCommandCount", "svgCommandDensity", "svgBlockyRisk");
+  if (isSvgScenario(scenario)) fields.push("svgCommandCount", "svgCommandDensity", "svgFractionalCoordinateRatio", "svgBlockyRisk");
   return [...new Set(fields)];
 }
 
