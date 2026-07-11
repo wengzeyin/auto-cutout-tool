@@ -6150,13 +6150,17 @@ function collectVectorRegions(keys, width, height) {
 
 function vectorColorKey(red, green, blue, alpha, step, vectorSettings = {}) {
   const metrics = colorMetrics(red, green, blue);
-  const lineArt = vectorSettings.protectLineArt && metrics.lightness < 86;
+  const lineArt = vectorSettings.protectLineArt && isProtectedVectorLineArt(metrics);
   const localStep = lineArt ? Math.max(8, Math.round(step * 0.55)) : step;
   const r = quantizeChannel(red, localStep);
   const g = quantizeChannel(green, localStep);
   const b = quantizeChannel(blue, localStep);
   const opacity = vectorSettings.flattenAlpha || alpha >= 248 ? "1" : (Math.round((alpha / 255) * 10) / 10).toFixed(1);
   return `${rgbToHex(r, g, b)}|${opacity}`;
+}
+
+function isProtectedVectorLineArt(metrics) {
+  return metrics.lightness < 96 || (metrics.lightness < 142 && metrics.saturation < 0.22);
 }
 
 function stabilizeVectorColorKeys(keys, width, height, vectorSettings = {}) {
@@ -6198,7 +6202,7 @@ function isDarkVectorKey(key = "") {
   const red = parseInt(hex.slice(1, 3), 16);
   const green = parseInt(hex.slice(3, 5), 16);
   const blue = parseInt(hex.slice(5, 7), 16);
-  return colorMetrics(red, green, blue).lightness < 96;
+  return isProtectedVectorLineArt(colorMetrics(red, green, blue));
 }
 
 function nearestNeighborVectorKey(pixels, keys, width, height, ownKey) {

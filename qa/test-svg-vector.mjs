@@ -17,6 +17,12 @@ for (let x = 45; x < 112; x += 1) {
   setPixel(imageData, x, 87, [12, 12, 12, 255]);
   if (x % 8 !== 0) setPixel(imageData, x, 88, [12, 12, 12, 255]);
 }
+for (let x = 128; x < 224; x += 1) {
+  setPixel(imageData, x, 28, [142, 142, 142, 180]);
+  setPixel(imageData, x, 29, [118, 118, 118, 255]);
+  setPixel(imageData, x, 30, [118, 118, 118, 255]);
+  setPixel(imageData, x, 31, [142, 142, 142, 180]);
+}
 
 const vectorSettings = {
   mode: "precise",
@@ -43,9 +49,12 @@ const tinyBlueHasCubic = Boolean(tinyBlueGroup && /C/.test(tinyBlueGroup.path));
 const hasOpacityGroups = [...groups.keys()].some((key) => !key.endsWith("|1"));
 const tinyRegionCount = [...groups.values()].filter((group) => group.area < 14).length;
 const darkGroup = [...groups.entries()].find(([key]) => /^#/.test(key) && keyLightness(key) < 70)?.[1];
+const grayLineArea = [...groups.entries()]
+  .filter(([key]) => /^#/.test(key) && keyLightness(key) >= 96 && keyLightness(key) < 150 && keySaturation(key) < 0.08)
+  .reduce((sum, [, group]) => sum + group.area, 0);
 const failures = [];
 
-if (pathCount < 3 || pathCount > 8) failures.push(`Expected 3-8 paths, got ${pathCount}.`);
+if (pathCount < 3 || pathCount > 10) failures.push(`Expected 3-10 paths, got ${pathCount}.`);
 if (!hasCubic) failures.push("Expected precise SVG to include cubic curve commands.");
 if (!tinyBlueHasCubic) failures.push("Expected small precise-mode details to use cubic paths instead of blocky straight-line boxes.");
 if (hasOpacityGroups) failures.push("Expected precise flat artwork SVG to merge alpha into solid color paths.");
@@ -55,6 +64,7 @@ if (gridAlignedRatio > 0.58) failures.push(`Expected precise SVG to smooth off t
 if (fractionalCoordinateRatio < 0.3) failures.push(`Expected precise SVG to keep subpixel coordinates, fractional ratio ${fractionalCoordinateRatio.toFixed(2)} is too low.`);
 if (tinyRegionCount > 0) failures.push(`Expected isolated speckles to merge away, got ${tinyRegionCount}.`);
 if (!darkGroup || darkGroup.area < 60) failures.push("Expected protected dark line art to remain as a filled path group.");
+if (grayLineArea < 170) failures.push(`Expected protected gray anti-aliased line art to remain, got area ${grayLineArea}.`);
 
 const photoLike = makePhotoLikeImageData(320, 260);
 const photoVectorSettings = {
@@ -90,6 +100,7 @@ const result = {
   fractionalCoordinateRatio: Math.round(fractionalCoordinateRatio * 100) / 100,
   tinyRegionCount,
   darkArea: darkGroup?.area || 0,
+  grayLineArea,
   tinyBlueHasCubic,
   hasCubic,
   hasOpacityGroups,
@@ -227,13 +238,17 @@ function collectVectorRegions(keys, width, height) {
 
 function vectorColorKey(red, green, blue, alpha, step, vectorSettings = {}) {
   const metrics = colorMetrics(red, green, blue);
-  const lineArt = vectorSettings.protectLineArt && metrics.lightness < 86;
+  const lineArt = vectorSettings.protectLineArt && isProtectedVectorLineArt(metrics);
   const localStep = lineArt ? Math.max(8, Math.round(step * 0.55)) : step;
   const r = quantizeChannel(red, localStep);
   const g = quantizeChannel(green, localStep);
   const b = quantizeChannel(blue, localStep);
   const opacity = vectorSettings.flattenAlpha || alpha >= 248 ? "1" : (Math.round((alpha / 255) * 10) / 10).toFixed(1);
   return `${rgbToHex(r, g, b)}|${opacity}`;
+}
+
+function isProtectedVectorLineArt(metrics) {
+  return metrics.lightness < 96 || (metrics.lightness < 142 && metrics.saturation < 0.22);
 }
 
 function stabilizeVectorColorKeys(keys, width, height, vectorSettings = {}) {
@@ -270,7 +285,12 @@ function stabilizeVectorColorKeys(keys, width, height, vectorSettings = {}) {
 }
 
 function isDarkVectorKey(key = "") {
-  return keyLightness(key) < 96;
+  const hex = key.split("|")[0] || "";
+  if (!/^#[0-9a-f]{6}$/i.test(hex)) return false;
+  const red = parseInt(hex.slice(1, 3), 16);
+  const green = parseInt(hex.slice(3, 5), 16);
+  const blue = parseInt(hex.slice(5, 7), 16);
+  return isProtectedVectorLineArt(colorMetrics(red, green, blue));
 }
 
 function nearestNeighborVectorKey(pixels, keys, width, height, ownKey) {
@@ -560,6 +580,15 @@ function keyIsBlue(key) {
   const green = parseInt(hex.slice(3, 5), 16);
   const blue = parseInt(hex.slice(5, 7), 16);
   return blue > red + 60 && blue > green + 24;
+}
+
+function keySaturation(key) {
+  const hex = key.split("|")[0] || "";
+  if (!/^#[0-9a-f]{6}$/i.test(hex)) return 1;
+  const red = parseInt(hex.slice(1, 3), 16);
+  const green = parseInt(hex.slice(3, 5), 16);
+  const blue = parseInt(hex.slice(5, 7), 16);
+  return colorMetrics(red, green, blue).saturation;
 }
 
 function roundPathNumber(value) {
