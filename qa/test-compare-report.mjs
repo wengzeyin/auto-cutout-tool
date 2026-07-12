@@ -26,11 +26,14 @@ if (!/improvements/.test(improved.stdout) || !/whiteFringeRatio|averageScore/.te
   failures.push("Expected improved comparison output to include improvements.");
 }
 if (regressed.status === 0) failures.push("Expected regressed report to fail comparison.");
-if (!/largeBoxRisk|averageScore|lineArtLossRatio|svgFractionalCoordinateRatio|elements/.test(regressed.stdout)) {
+if (!/largeBoxRisk|averageScore|lineArtLossRatio|svgFractionalCoordinateRatio|smallElementScoreMax|elements/.test(regressed.stdout)) {
   failures.push("Expected regressed comparison output to mention risk, score, metric, or element regression.");
 }
 if (!/svgFractionalCoordinateRatio/.test(regressed.stdout)) {
   failures.push("Expected regressed comparison output to mention svgFractionalCoordinateRatio.");
+}
+if (!/smallElementScoreMax/.test(regressed.stdout)) {
+  failures.push("Expected regressed comparison output to mention smallElementScoreMax.");
 }
 
 const result = {
@@ -68,6 +71,9 @@ function makeReport(kind) {
         whiteFringeRatio: kind === "improved" ? 0.012 : 0.04,
         whiteFringeAreaRatio: 0.0005,
         componentCount: kind === "regressed" ? 2 : kind === "improved" ? 9 : 7,
+        clearSmallElementCount: kind === "regressed" ? 0 : kind === "improved" ? 4 : 3,
+        smallElementScoreMax: kind === "regressed" ? 0.56 : kind === "improved" ? 0.88 : 0.76,
+        smallElementScoreAverage: kind === "regressed" ? 0.44 : kind === "improved" ? 0.78 : 0.66,
         largeBoxRisk: kind === "regressed",
         smallElementRisk: false,
         svgPathCount: 42,
@@ -93,6 +99,9 @@ function makeReport(kind) {
         whiteFringeRatio: 0.035,
         whiteFringeAreaRatio: 0.0004,
         componentCount: kind === "regressed" ? 1 : 4,
+        clearSmallElementCount: kind === "regressed" ? 0 : 2,
+        smallElementScoreMax: kind === "regressed" ? 0.5 : 0.74,
+        smallElementScoreAverage: kind === "regressed" ? 0.42 : 0.64,
         largeBoxRisk: false,
         smallElementRisk: kind === "regressed",
         svgPathCount: 25,

@@ -51,6 +51,7 @@ node qa/validate-report.mjs path/to/qa-report.json
 - 发丝、商品、多元素贴纸、靠近角色、小物体等重点场景的 matte / 元素分不得低于 3.5。
 - 不得存在 `releaseBlocker`。
 - 每条完成记录必须包含关键算法指标：`alphaCoverage`、`edgeJaggednessScore`、`semiTransparentCoreRatio`、`componentCount`、`largeBoxRisk`、`svgPathCount`、`svgFractionalCoordinateRatio`。
+- 多元素/贴纸/小物体场景还必须包含 `clearSmallElementCount`、`smallElementScoreMax`、`smallElementScoreAverage`，用于判断小但清晰的元素是否被稳定识别。
 - 插画、贴纸、logo、靠近角色等场景还必须包含线稿/浅色区域/SVG 路径密度指标，并且不能出现明显大框、漏小元素或 SVG 块状风险。
 - SVG 轻量回归需要同时覆盖精准插画路径和照片类自动 SVG：精准模式应有平滑曲线，照片/毛发类自动模式应保持低路径数量、低命令密度，并合并微小噪点。
 - QA runner 健康检查回归必须确认 `/__qa_health` token 匹配，端口被旧服务占用时不能误连旧页面。

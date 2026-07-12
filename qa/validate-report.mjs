@@ -59,6 +59,9 @@ for (const row of rows) {
   if (isMultiElementScenario(scenario)) {
     if (metrics.largeBoxRisk) failures.push(`${name}: largeBoxRisk is true in multi-element scenario.`);
     if (metrics.smallElementRisk) failures.push(`${name}: smallElementRisk is true in multi-element scenario.`);
+    if (Number(metrics.smallComponentCount || 0) > 0 && Number(metrics.smallElementScoreMax || 0) < 0.65) {
+      failures.push(`${name}: smallElementScoreMax ${format(metrics.smallElementScoreMax)} is too low.`);
+    }
   }
   if (isSvgScenario(scenario)) {
     if (metrics.svgBlockyRisk) failures.push(`${name}: svgBlockyRisk is true.`);
@@ -139,7 +142,7 @@ function requiredMetricFieldsForScenario(scenario) {
   ];
   if (isMatteCriticalScenario(scenario)) fields.push("whiteFringeRatio");
   if (isIllustrationScenario(scenario)) fields.push("lineArtLossRatio", "lightRegionLossRatio");
-  if (isMultiElementScenario(scenario)) fields.push("smallComponentCount", "smallElementRisk");
+  if (isMultiElementScenario(scenario)) fields.push("smallComponentCount", "clearSmallElementCount", "smallElementScoreMax", "smallElementScoreAverage", "smallElementRisk");
   if (isSvgScenario(scenario)) fields.push("svgCommandCount", "svgCommandDensity", "svgFractionalCoordinateRatio", "svgBlockyRisk");
   return [...new Set(fields)];
 }

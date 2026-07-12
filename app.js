@@ -5068,6 +5068,7 @@ function computeCurrentQaMetrics() {
     const boxRatio = (component.width * component.height) / canvasArea;
     return boxRatio > 0 && boxRatio < 0.012;
   }).length;
+  const smallElementStats = measureSmallElementScores(state.components, canvasArea);
   const largeBoxRiskRelevant = els.detectMode.value === "split" || els.detectMode.value === "illustration" || preset === "multiSticker";
   let largeBoxRisk = largeBoxRiskRelevant && state.components.some((component) => {
     const boxRatio = (component.width * component.height) / canvasArea;
@@ -5095,6 +5096,9 @@ function computeCurrentQaMetrics() {
     whiteFringeAverageAlpha: roundMetric(matteQuality.whiteFringeAverageAlpha),
     componentCount,
     smallComponentCount,
+    clearSmallElementCount: smallElementStats.clearCount,
+    smallElementScoreMax: roundMetric(smallElementStats.max),
+    smallElementScoreAverage: roundMetric(smallElementStats.average),
     overSplitBefore: state.lastOverSplitDebug?.before || componentCount,
     overSplitStage: state.lastOverSplitDebug?.stage || "",
     overSplitGrouped: state.lastOverSplitDebug?.grouped || 0,
@@ -5103,7 +5107,10 @@ function computeCurrentQaMetrics() {
     tinyFragmentBefore: tinyDebug?.before || componentCount,
     tinyFragmentStage: tinyDebug?.stage || "",
     tinyFragmentAfter: tinyDebug?.after || componentCount,
-    smallElementRisk: preset === "multiSticker" && componentCount < 3 && smallComponentCount === 0,
+    smallElementRisk: preset === "multiSticker" && (
+      (componentCount < 3 && smallComponentCount === 0) ||
+      (smallComponentCount > 0 && smallElementStats.clearCount === 0 && componentCount < 6)
+    ),
     largeBoxRisk,
     svgPathCount: svgMetrics.pathCount,
     svgCommandCount: svgMetrics.commandCount,
@@ -5116,6 +5123,20 @@ function computeCurrentQaMetrics() {
   };
   window.__cutoutQaCurrentMetrics = metrics;
   return metrics;
+}
+
+function measureSmallElementScores(components, canvasArea) {
+  const minArea = Math.max(8, canvasArea * 0.001);
+  const smallComponents = components.filter((component) => {
+    const boxRatio = (component.width * component.height) / Math.max(1, canvasArea);
+    return boxRatio > 0 && boxRatio < 0.018;
+  });
+  if (!smallComponents.length) return { count: 0, clearCount: 0, max: 0, average: 0 };
+  const scores = smallComponents.map((component) => scoreSmallComponent(component, canvasArea, minArea));
+  const clearCount = scores.filter((score) => score >= 0.72).length;
+  const max = Math.max(...scores);
+  const average = scores.reduce((sum, score) => sum + score, 0) / scores.length;
+  return { count: smallComponents.length, clearCount, max, average };
 }
 
 function buildQaMetricsForItem(item) {
@@ -5359,6 +5380,9 @@ function generateQaReportHtml(report) {
         <td>${svgRisk}</td>
         <td>${escapeHtml([...score.notes || [], warnings || row.error || ""].filter(Boolean).join("；"))}</td>
         <td>${formatMetric(metrics.svgFractionalCoordinateRatio)}</td>
+        <td>${metrics.clearSmallElementCount ?? ""}</td>
+        <td>${formatMetric(metrics.smallElementScoreMax)}</td>
+        <td>${formatMetric(metrics.smallElementScoreAverage)}</td>
       </tr>`;
   }).join("");
   return `<!doctype html>
@@ -5390,6 +5414,7 @@ function generateQaReportHtml(report) {
         <th>alphaCoverage</th><th>edgeJaggedness</th><th>semiTransparentCore</th>
         <th>lineArtLoss</th><th>lightRegionLoss</th><th>whiteFringe</th><th>whiteFringePx</th><th>whiteFringeArea</th><th>lowAlphaFringe</th><th>fringeAvgAlpha</th><th>大框风险</th><th>svgPathCount</th><th>svgCommandCount</th><th>svgCommandDensity</th><th>svgGridAligned</th><th>SVG 块状风险</th><th>提示</th>
         <th>svgFractional</th>
+        <th>clearSmallElements</th><th>smallElementScoreMax</th><th>smallElementScoreAvg</th>
       </tr>
     </thead>
     <tbody>${rows}</tbody>

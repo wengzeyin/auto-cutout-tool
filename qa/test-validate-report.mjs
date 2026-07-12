@@ -74,6 +74,9 @@ function makeReport({ fail }) {
       whiteFringeRatio: 0.01,
       componentCount,
       smallComponentCount: /贴纸合集|靠近|小物体|插画图标/.test(scenario) ? 3 : 0,
+      clearSmallElementCount: /贴纸合集|靠近|小物体|插画图标/.test(scenario) ? 2 : 0,
+      smallElementScoreMax: /贴纸合集|靠近|小物体|插画图标/.test(scenario) ? 0.84 : 0,
+      smallElementScoreAverage: /贴纸合集|靠近|小物体|插画图标/.test(scenario) ? 0.76 : 0,
       smallElementRisk: false,
       largeBoxRisk: false,
       svgPathCount: /插画|图标|贴纸|logo|文字|商品|靠近/.test(scenario) ? 18 : 4,
@@ -90,6 +93,9 @@ function makeReport({ fail }) {
       delete metrics.lineArtLossRatio;
       delete metrics.lightRegionLossRatio;
       delete metrics.smallComponentCount;
+      delete metrics.clearSmallElementCount;
+      delete metrics.smallElementScoreMax;
+      delete metrics.smallElementScoreAverage;
       delete metrics.svgCommandDensity;
       delete metrics.svgFractionalCoordinateRatio;
     }

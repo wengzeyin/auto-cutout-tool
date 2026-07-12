@@ -24,6 +24,8 @@ const CONFIG = {
     svgCommandDensity: { absolute: 1.5, relative: 0.35, direction: "lower" },
     svgGridAlignedRatio: { absolute: 0.08, relative: 0.2, direction: "lower" },
     svgFractionalCoordinateRatio: { absolute: 0.08, relative: 0.2, direction: "higher" },
+    smallElementScoreMax: { absolute: 0.12, relative: 0.2, direction: "higher" },
+    smallElementScoreAverage: { absolute: 0.1, relative: 0.2, direction: "higher" },
   },
   improvementMetrics: [
     "edgeJaggednessScore",
@@ -35,6 +37,8 @@ const CONFIG = {
     "svgCommandDensity",
     "svgGridAlignedRatio",
     "svgFractionalCoordinateRatio",
+    "smallElementScoreMax",
+    "smallElementScoreAverage",
   ],
   riskMetrics: [
     "largeBoxRisk",
