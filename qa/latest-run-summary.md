@@ -1,6 +1,6 @@
 # QA Run Summary
 
-Run time: 2026-07-13 17:35 Asia/Shanghai
+Run time: 2026-07-13 17:47 Asia/Shanghai
 
 Mode: mixed QA scenarios
 Export format: PNG / WebP / SVG validation
@@ -19,7 +19,7 @@ Export scale: 1x baseline with size checks
 - Line art risk: 0
 - Light region risk: 0
 - Semi-transparent core risk: 0
-- ZIP: `qa/run-output/cutout-batch-20260713-1735.zip`
+- ZIP: `qa/run-output/cutout-batch-20260713-1747.zip`
 - Raw report: `qa/run-output/qa-report.latest.json`
 - Browser QA metric coverage: SVG 7 / 7 rows, multi-element small metrics 4 / 4 rows
 
@@ -27,14 +27,14 @@ Export scale: 1x baseline with size checks
 
 | # | Image | Scenario | Type | Elements | Avg | Matte | Components | SVG | Edge | Semi Core | SVG Fractional | Small Clear | SVG Blocky |
 |---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| 01 | 01-portrait-hair-simulated.png | 人像发丝模拟 | photo | 1 | 4.75 | 5 | 5 | 4 | 0.0925 | 0.0687 |  |  | no |
-| 02 | 02-curly-hair-simulated.png | 卷发碎发模拟 | photo | 1 | 4.575 | 4.3 | 5 | 4 | 0.1 | 0.2192 |  |  | no |
-| 03 | 03-pet-long-fur-simulated.png | 宠物长毛模拟 | photo | 1 | 4.75 | 5 | 5 | 4 | 0.1168 | 0.0765 |  |  | no |
-| 04 | 04-pet-short-fur-simulated.png | 宠物短毛模拟 | photo | 1 | 4.575 | 4.3 | 5 | 4 | 0.078 | 0.198 |  |  | no |
+| 01 | 01-portrait-hair-simulated.png | 人像发丝模拟 | photo | 1 | 4.75 | 5 | 5 | 4 | 0.0975 | 0.0623 |  |  | no |
+| 02 | 02-curly-hair-simulated.png | 卷发碎发模拟 | photo | 1 | 4.575 | 4.3 | 5 | 4 | 0.1007 | 0.2165 |  |  | no |
+| 03 | 03-pet-long-fur-simulated.png | 宠物长毛模拟 | photo | 1 | 4.75 | 5 | 5 | 4 | 0.1242 | 0.0705 |  |  | no |
+| 04 | 04-pet-short-fur-simulated.png | 宠物短毛模拟 | photo | 1 | 4.575 | 4.3 | 5 | 4 | 0.0782 | 0.1955 |  |  | no |
 | 05 | 05-light-product-white-bg.png | 白底浅色商品 | product | 1 | 5 | 5 | 5 | 5 | 0.1678 | 0.001 | 0.8085 |  | no |
 | 06 | 06-dark-product.png | 深色商品 | product | 1 | 5 | 5 | 5 | 5 | 0.1518 | 0.0032 | 0.809 |  | no |
 | 07 | 07-transparent-material.png | 透明材质 | transparentMaterial | 1 | 4.75 | 5 | 5 | 4 | 0.0513 | 0.893 |  |  | no |
-| 08 | 08-person-complex-bg.png | 复杂背景人物 | photo | 1 | 4.4 | 3.6 | 5 | 4 | 0.1049 | 0.2959 |  |  | no |
+| 08 | 08-person-complex-bg.png | 复杂背景人物 | photo | 1 | 4.4 | 3.6 | 5 | 4 | 0.1058 | 0.2942 |  |  | no |
 | 09 | 09-product-complex-bg.png | 复杂背景商品 | product | 1 | 4.725 | 3.9 | 5 | 5 | 0.4275 | 0.0224 | 0.7057 |  | no |
 | 10 | 10-illustration-icons.png | 插画图标 | illustration | 6 | 5 | 5 | 5 | 5 | 0.117 | 0.0732 | 0.834 | 0 | no |
 | 11 | 11-sticker-pack.png | 多元素贴纸合集 | sticker | 9 | 5 | 5 | 5 | 5 | 0.1022 | 0.0251 | 0.8092 | 0 | no |
@@ -56,6 +56,8 @@ Export scale: 1x baseline with size checks
 - Added clear standalone tiny-element protection in multi-object split mode. Small badges/icons with strong alpha cores and a transparent gap near larger stickers are preserved instead of being absorbed into the large element.
 - Added SVG micro-gap closing for flat vector regions. Same-color regions split by tiny transparent cracks now close back into one connected filled area; SVG QA asserts `crackedConnectedRegionCount: 1`.
 - Added a dark-background restore guard so source pixels matching a black background and touching true transparent exterior are not restored as line art. The new matte regression keeps exterior black outline alpha at 0 while preserving internal black lines at alpha 235.
+- Added photo dense-core and post-edge core normalization. Dense subject interiors are restored to solid alpha after edge smoothing, while thin hair/fur strokes remain semi-transparent; matte QA now asserts dense core alpha 255, post-edge core alpha 253, and fine hair remains below the hardening threshold.
+- Full browser QA showed photo `semiTransparentCoreRatio` moved down on the tracked photo rows: `01` 0.0686 -> 0.0623, `02` 0.2192 -> 0.2165, `03` 0.0763 -> 0.0705, `04` 0.1975 -> 0.1955, `08` 0.2959 -> 0.2942.
 - Added browser QA metric coverage gates for `svgFractionalCoordinateRatio`, `clearSmallElementCount`, `smallElementScoreMax`, and `smallElementScoreAverage`.
 - Added local IMG.LY model-resource proxy/cache for localhost QA to avoid flaky browser-side CDN fetch failures.
 - Added repeated vertical sticker-stack splitting; `11-sticker-pack.png` now exports 9 elements instead of the failed 3-column grouping.

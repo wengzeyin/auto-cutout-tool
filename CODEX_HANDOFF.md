@@ -6,7 +6,7 @@ This file is for continuing the project from another Codex thread or device.
 
 - Repo: `wengzeyin/auto-cutout-tool`
 - Branch: `main`
-- Last confirmed sync: `2026-07-13`, local `main` matches `origin/main` at `Protect clear tiny split elements`.
+- Last confirmed sync: `2026-07-13`, local `main` matches `origin/main` at `Close SVG micro gaps and guard dark restore`.
 - Pushed commits through `Polish UI icons and motion`:
   - `8da0f03 Improve split QA and Windows runner portability`
   - `Refine result-first UI workbench`
@@ -32,6 +32,7 @@ This file is for continuing the project from another Codex thread or device.
   - `Add AI timeout guard`
   - `Protect clear tiny split elements`
   - `Close SVG micro gaps and guard dark restore`
+  - `Normalize photo dense core alpha`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -46,7 +47,7 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 ## Current Continuation Notes
 
 - The latest algorithm work has focused on making quality regressions measurable before changing more core behavior.
-- Current pushed head: `Close SVG micro gaps and guard dark restore`.
+- Current pushed head: `Normalize photo dense core alpha`.
 - Safe next algorithm targets:
   - Continue performance work around actual AI fallback timeouts, cancellation, and large-image scan scheduling.
   - Improve real matte behavior for light illustration interiors beyond synthetic coverage.
@@ -218,6 +219,14 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - The guard uses near-zero transparent exterior as the signal, so internal black text and line art are still restored.
 - Added a matte regression in `qa/test-matte-refine.mjs`: exterior black outline alpha stays `0`, while the internal dark line restores to alpha `235`.
 - Black solid-background browser regression still passes for `black`, `black-halo`, and `white` cases with `darkHaloRatio` 0 and no IMG.LY model-resource requests.
+
+### Photo Dense Core Alpha - Done
+
+- Added photo-only dense-core alpha normalization before edge smoothing and a post-edge core normalization pass after `antiAliasHardEdges()`.
+- The pass uses local alpha-neighborhood density, so dense subject interiors become solid while isolated hair/fur strands keep soft alpha.
+- Mirrored the logic in `matte-worker.js` and `qa/test-matte-refine.mjs`; matte QA asserts dense photo core alpha `255`, post-edge core alpha `253`, and fine hair remains below hardening thresholds.
+- Full browser QA on `2026-07-13 17:47` passed with 15/15 rows, average score 4.79, 0 release blockers, `consoleFailures: []`, and `consoleMessages: []`.
+- Baseline comparison passed with no regressions; tracked photo `semiTransparentCoreRatio` improved on `01`, `02`, `03`, `04`, and `08`.
 
 ## UI Pass Plan
 

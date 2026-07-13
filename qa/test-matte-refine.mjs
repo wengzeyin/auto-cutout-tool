@@ -292,9 +292,11 @@ function refineAlpha(image, settings) {
     const edgeFloor = settings.preserveLineArt ? Math.min(alpha, 42) : 0;
     data[index + 3] = Math.round(clamp(Math.max(edgeFloor, curve * 255 * midBoost), 0, 255));
   }
+  normalizeDenseCoreAlpha(image, settings);
   guidedSmoothEdgeAlpha(image, settings);
   suppressWhiteFringeAlpha(image, settings);
   antiAliasHardEdges(image, settings);
+  normalizePostEdgeCoreAlpha(image, settings);
   suppressWhiteFringeAlpha(image, settings);
   suppressDarkBackgroundFringeAlpha(image, settings);
   return image;
@@ -579,6 +581,51 @@ function normalizeSemiOpaqueCore(image, settings) {
   return image;
 }
 
+function normalizeDenseCoreAlpha(image, settings) {
+  const threshold = Number(settings.denseCoreNormalizeThreshold || 0);
+  if (!threshold || settings.imageType === "transparentMaterial") return image;
+  const alphaSource = new Uint8ClampedArray(image.data.length / 4);
+  for (let index = 0; index < alphaSource.length; index += 1) alphaSource[index] = image.data[index * 4 + 3];
+  const neighborThreshold = Number(settings.denseCoreNeighborThreshold || 96);
+  const neighborCount = Number(settings.denseCoreNeighborCount || 15);
+  const transparentThreshold = Number(settings.denseCoreTransparentThreshold || 10);
+  const transparentLimit = Number(settings.denseCoreTransparentLimit ?? 2);
+  for (let index = 0; index < alphaSource.length; index += 1) {
+    const alpha = alphaSource[index];
+    if (alpha < threshold || alpha >= 245) continue;
+    const x = index % width;
+    const y = Math.floor(index / width);
+    if (countAlphaNeighbors(alphaSource, x, y, 2, neighborThreshold) < neighborCount) continue;
+    if (countAlphaNeighbors(alphaSource, x, y, 2, transparentThreshold, true) > transparentLimit) continue;
+    image.data[index * 4 + 3] = 255;
+  }
+  return image;
+}
+
+function normalizePostEdgeCoreAlpha(image, settings) {
+  const threshold = Number(settings.postEdgeCoreNormalizeThreshold || 0);
+  if (!threshold || settings.imageType === "transparentMaterial") return image;
+  const neighborThreshold = Number(settings.postEdgeCoreNeighborThreshold || 224);
+  const neighborCount = Number(settings.postEdgeCoreNeighborCount || 5);
+  const passes = Math.max(1, Math.min(3, Number(settings.postEdgeCoreNormalizePasses || 1)));
+  for (let pass = 0; pass < passes; pass += 1) {
+    const alphaSource = new Uint8ClampedArray(image.data.length / 4);
+    for (let index = 0; index < alphaSource.length; index += 1) alphaSource[index] = image.data[index * 4 + 3];
+    let changed = 0;
+    for (let index = 0; index < alphaSource.length; index += 1) {
+      const alpha = alphaSource[index];
+      if (alpha < threshold || alpha >= 245) continue;
+      const x = index % width;
+      const y = Math.floor(index / width);
+      if (countAlphaNeighbors(alphaSource, x, y, 2, neighborThreshold) < neighborCount) continue;
+      image.data[index * 4 + 3] = 255;
+      changed += 1;
+    }
+    if (!changed) break;
+  }
+  return image;
+}
+
 function hasStrongAlphaNeighbor(alphaSource, x, y, radius, threshold, minCount) {
   let count = 0;
   for (let yy = Math.max(0, y - radius); yy <= Math.min(height - 1, y + radius); yy += 1) {
@@ -590,6 +637,17 @@ function hasStrongAlphaNeighbor(alphaSource, x, y, radius, threshold, minCount) 
     }
   }
   return false;
+}
+
+function countAlphaNeighbors(alphaSource, x, y, radius, threshold, below = false) {
+  let count = 0;
+  for (let yy = Math.max(0, y - radius); yy <= Math.min(height - 1, y + radius); yy += 1) {
+    for (let xx = Math.max(0, x - radius); xx <= Math.min(width - 1, x + radius); xx += 1) {
+      const alpha = alphaSource[yy * width + xx];
+      if (below ? alpha <= threshold : alpha >= threshold) count += 1;
+    }
+  }
+  return count;
 }
 
 function edgeJaggedness(image) {
@@ -1013,6 +1071,39 @@ fillRect(semiCoreBefore, 72, 24, 88, 36, [80, 120, 160, 118]);
 const semiCoreAfter = makeImageData([255, 255, 255, 0]);
 semiCoreAfter.data.set(semiCoreBefore.data);
 normalizeSemiOpaqueCore(semiCoreAfter, { postCoreNormalizeThreshold: 88, postCoreNeighborThreshold: 144, postCoreNeighborCount: 4, postCoreNormalizePasses: 3 });
+const denseCoreBefore = makeImageData([255, 255, 255, 0]);
+const denseCore = [];
+const fineHair = [];
+fillRect(denseCoreBefore, 24, 24, 54, 54, [96, 128, 164, 132]);
+for (let y = 28; y <= 50; y += 1) {
+  for (let x = 28; x <= 50; x += 1) denseCore.push(y * width + x);
+}
+drawLine(denseCoreBefore, 90, 28, 90, 92, [96, 128, 164, 132], 0, fineHair);
+const denseCoreAfter = makeImageData([255, 255, 255, 0]);
+denseCoreAfter.data.set(denseCoreBefore.data);
+normalizeDenseCoreAlpha(denseCoreAfter, {
+  imageType: "photo",
+  denseCoreNormalizeThreshold: 112,
+  denseCoreNeighborThreshold: 96,
+  denseCoreNeighborCount: 15,
+  denseCoreTransparentThreshold: 8,
+  denseCoreTransparentLimit: 3,
+});
+const postEdgeCoreBefore = makeImageData([255, 255, 255, 0]);
+const postEdgeCoreBand = [];
+const postEdgeHair = [];
+fillRect(postEdgeCoreBefore, 22, 22, 70, 70, [90, 120, 160, 255]);
+fillRect(postEdgeCoreBefore, 42, 22, 48, 70, [90, 120, 160, 176], postEdgeCoreBand);
+drawLine(postEdgeCoreBefore, 106, 28, 106, 92, [90, 120, 160, 176], 0, postEdgeHair);
+const postEdgeCoreAfter = makeImageData([255, 255, 255, 0]);
+postEdgeCoreAfter.data.set(postEdgeCoreBefore.data);
+normalizePostEdgeCoreAlpha(postEdgeCoreAfter, {
+  imageType: "photo",
+  postEdgeCoreNormalizeThreshold: 124,
+  postEdgeCoreNeighborThreshold: 224,
+  postEdgeCoreNeighborCount: 5,
+  postEdgeCoreNormalizePasses: 2,
+});
 const glassBefore = makeImageData([255, 255, 255, 0]);
 const glassCore = [];
 const glassHighlight = [];
@@ -1066,6 +1157,10 @@ const metrics = {
   semiCoreBefore: averageAlphaInRect(semiCoreBefore, 28, 28, 36, 36),
   semiCoreAfter: averageAlphaInRect(semiCoreAfter, 28, 28, 36, 36),
   semiEdgeAfter: averageAlphaInRect(semiCoreAfter, 72, 24, 88, 36),
+  denseCoreAfter: averageAlpha(denseCoreAfter, denseCore),
+  denseHairAfter: averageAlpha(denseCoreAfter, fineHair),
+  postEdgeCoreAfter: averageAlpha(postEdgeCoreAfter, postEdgeCoreBand),
+  postEdgeHairAfter: averageAlpha(postEdgeCoreAfter, postEdgeHair),
   glassCoreBefore: averageAlpha(glassBefore, glassCore),
   glassCoreAfter: averageAlpha(glassAfter, glassCore),
   glassHighlightAfter: averageAlpha(glassAfter, glassHighlight),
@@ -1134,6 +1229,10 @@ if (metrics.darkRestoreExteriorAfter > 2) failures.push(`dark background exterio
 if (metrics.darkRestoreInteriorLineAfter < 200) failures.push(`interior dark line was not restored: ${metrics.darkRestoreInteriorLineAfter.toFixed(1)}`);
 if (metrics.semiCoreAfter < 250) failures.push(`semi-transparent core not normalized: ${metrics.semiCoreBefore.toFixed(1)} -> ${metrics.semiCoreAfter.toFixed(1)}`);
 if (metrics.semiEdgeAfter > 145) failures.push(`isolated semi-transparent edge was over-normalized: ${metrics.semiEdgeAfter.toFixed(1)}`);
+if (metrics.denseCoreAfter < 250) failures.push(`dense photo core was not normalized: ${metrics.denseCoreAfter.toFixed(1)}`);
+if (metrics.denseHairAfter > 150) failures.push(`fine photo hair was over-normalized: ${metrics.denseHairAfter.toFixed(1)}`);
+if (metrics.postEdgeCoreAfter < 250) failures.push(`post-edge photo core was not restored: ${metrics.postEdgeCoreAfter.toFixed(1)}`);
+if (metrics.postEdgeHairAfter > 190) failures.push(`post-edge fine hair was over-normalized: ${metrics.postEdgeHairAfter.toFixed(1)}`);
 if (metrics.glassCoreAfter > 238) failures.push(`transparent material core over-normalized: ${metrics.glassCoreBefore.toFixed(1)} -> ${metrics.glassCoreAfter.toFixed(1)}`);
 if (metrics.glassCoreAfter < metrics.glassCoreBefore * 0.5) failures.push(`transparent material core over-cleared: ${metrics.glassCoreBefore.toFixed(1)} -> ${metrics.glassCoreAfter.toFixed(1)}`);
 if (metrics.glassHighlightAfter < 150) failures.push(`transparent material highlight lost: ${metrics.glassHighlightAfter.toFixed(1)}`);

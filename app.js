@@ -835,6 +835,15 @@ function buildMatteProfile(base, imageType = "unknown") {
     profile.postCoreNeighborThreshold = profile.fidelity === "preserve" ? 176 : 144;
     profile.postCoreNeighborCount = profile.fidelity === "preserve" ? 5 : 4;
     profile.postCoreNormalizePasses = 3;
+    profile.denseCoreNormalizeThreshold = profile.fidelity === "preserve" ? 132 : 112;
+    profile.denseCoreNeighborThreshold = profile.fidelity === "preserve" ? 118 : 96;
+    profile.denseCoreNeighborCount = profile.fidelity === "preserve" ? 17 : 15;
+    profile.denseCoreTransparentThreshold = Math.max(8, profile.edgeLow);
+    profile.denseCoreTransparentLimit = profile.fidelity === "preserve" ? 2 : 3;
+    profile.postEdgeCoreNormalizeThreshold = profile.fidelity === "preserve" ? 142 : 124;
+    profile.postEdgeCoreNeighborThreshold = 224;
+    profile.postEdgeCoreNeighborCount = profile.fidelity === "preserve" ? 6 : 5;
+    profile.postEdgeCoreNormalizePasses = 2;
   }
 
   if (profile.fidelity === "preserve") {
@@ -2092,9 +2101,11 @@ function refineCutoutAlpha(sourceCanvas, settings) {
     data[index + 3] = Math.round(clamp(Math.max(edgeFloor, curve * 255 * midBoost), 0, 255));
   }
   normalizeSemiOpaqueCore(imageData, settings);
+  normalizeDenseCoreAlpha(imageData, settings);
   guidedSmoothEdgeAlpha(imageData, settings);
   suppressWhiteFringeAlpha(imageData, settings);
   antiAliasHardEdges(imageData, settings);
+  normalizePostEdgeCoreAlpha(imageData, settings);
   suppressWhiteFringeAlpha(imageData, settings);
   suppressDarkBackgroundFringeAlpha(imageData, settings);
   ctx.putImageData(imageData, 0, 0);
@@ -2326,6 +2337,51 @@ function normalizeSemiOpaqueCore(imageData, settings) {
   }
 }
 
+function normalizeDenseCoreAlpha(imageData, settings) {
+  const threshold = Number(settings.denseCoreNormalizeThreshold || 0);
+  if (!threshold || settings.imageType === "transparentMaterial") return;
+  const { width, height, data } = imageData;
+  const source = new Uint8ClampedArray(data.length / 4);
+  for (let index = 0; index < source.length; index += 1) source[index] = data[index * 4 + 3];
+  const neighborThreshold = Number(settings.denseCoreNeighborThreshold || 96);
+  const neighborCount = Number(settings.denseCoreNeighborCount || 15);
+  const transparentThreshold = Number(settings.denseCoreTransparentThreshold || 10);
+  const transparentLimit = Number(settings.denseCoreTransparentLimit ?? 2);
+  for (let index = 0; index < source.length; index += 1) {
+    const alpha = source[index];
+    if (alpha < threshold || alpha >= 245) continue;
+    const x = index % width;
+    const y = Math.floor(index / width);
+    if (countAlphaNeighbors(source, width, height, x, y, 2, neighborThreshold) < neighborCount) continue;
+    if (countAlphaNeighbors(source, width, height, x, y, 2, transparentThreshold, true) > transparentLimit) continue;
+    data[index * 4 + 3] = 255;
+  }
+}
+
+function normalizePostEdgeCoreAlpha(imageData, settings) {
+  const threshold = Number(settings.postEdgeCoreNormalizeThreshold || 0);
+  if (!threshold || settings.imageType === "transparentMaterial") return;
+  const { width, height, data } = imageData;
+  const neighborThreshold = Number(settings.postEdgeCoreNeighborThreshold || 224);
+  const neighborCount = Number(settings.postEdgeCoreNeighborCount || 5);
+  const passes = Math.max(1, Math.min(3, Number(settings.postEdgeCoreNormalizePasses || 1)));
+  for (let pass = 0; pass < passes; pass += 1) {
+    const source = new Uint8ClampedArray(data.length / 4);
+    for (let index = 0; index < source.length; index += 1) source[index] = data[index * 4 + 3];
+    let changed = 0;
+    for (let index = 0; index < source.length; index += 1) {
+      const alpha = source[index];
+      if (alpha < threshold || alpha >= 245) continue;
+      const x = index % width;
+      const y = Math.floor(index / width);
+      if (countAlphaNeighbors(source, width, height, x, y, 2, neighborThreshold) < neighborCount) continue;
+      data[index * 4 + 3] = 255;
+      changed += 1;
+    }
+    if (!changed) break;
+  }
+}
+
 function shouldNormalizeCoreAlpha(alphaSource, width, height, pixelIndex, alpha, settings) {
   if (settings.imageType === "transparentMaterial") return false;
   const threshold = Number(settings.coreNormalizeThreshold || 0);
@@ -2333,6 +2389,21 @@ function shouldNormalizeCoreAlpha(alphaSource, width, height, pixelIndex, alpha,
   const x = pixelIndex % width;
   const y = Math.floor(pixelIndex / width);
   return hasStrongAlphaNeighbor(alphaSource, width, height, x, y, 2, Number(settings.coreNeighborThreshold || 176), 3);
+}
+
+function countAlphaNeighbors(alphaSource, width, height, x, y, radius, threshold, below = false) {
+  let count = 0;
+  for (let oy = -radius; oy <= radius; oy += 1) {
+    const py = y + oy;
+    if (py < 0 || py >= height) continue;
+    for (let ox = -radius; ox <= radius; ox += 1) {
+      const px = x + ox;
+      if (px < 0 || px >= width) continue;
+      const alpha = alphaSource[py * width + px];
+      if (below ? alpha <= threshold : alpha >= threshold) count += 1;
+    }
+  }
+  return count;
 }
 
 function hasStrongAlphaNeighbor(alphaSource, width, height, x, y, radius, threshold, minCount) {
