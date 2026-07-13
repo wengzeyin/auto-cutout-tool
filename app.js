@@ -646,8 +646,9 @@ function getRefineSettings() {
   const imageType = state.currentItem?.imageType || state.imageType || "unknown";
   const preset = getAlgorithmPreset(imageType);
   const sourceBackground = state.currentItem?.fastCutoutBackground
-    ? { kind: state.currentItem.fastCutoutBackground, color: [0, 0, 0] }
+    ? { kind: state.currentItem.fastCutoutBackground, color: [0, 0, 0], foreground: null }
     : estimateSourceBackgroundKind(state.sourceOriginalCanvas);
+  const darkCleanup = shouldEnableDarkBackgroundMatteCleanup(imageType, sourceBackground);
   const base = {
     edgeSmooth: Number(els.edgeSmooth.value),
     feather: Number(els.feather.value),
@@ -656,7 +657,7 @@ function getRefineSettings() {
     edgeOffset: Number(els.edgeOffset.value),
     fidelity: els.alphaBoost.value === "soft" ? "preserve" : els.alphaBoost.value === "clean" ? "clean" : "balanced",
     preset,
-    sourceBackgroundKind: sourceBackground?.kind || "unknown",
+    sourceBackgroundKind: darkCleanup ? sourceBackground?.kind || "unknown" : "unknown",
     sourceBackgroundColor: sourceBackground?.color || [0, 0, 0],
   };
   return buildMatteProfile(base, imageType);
@@ -669,14 +670,27 @@ function estimateSourceBackgroundKind(sourceCanvas) {
     const imageData = ctx.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
     const background = estimateSolidEdgeBackground(imageData);
     if (!background || background.coverage < 0.42 || background.variance > 48) return null;
+    let foreground = null;
     if (background.metrics.lightness < 58 && background.metrics.saturation < 0.24) {
-      return { kind: "dark", color: background.color };
+      const mask = floodBackgroundMask(imageData, background.color, 82);
+      foreground = measureSolidBackgroundForeground(imageData, mask);
+    }
+    if (background.metrics.lightness < 58 && background.metrics.saturation < 0.24) {
+      return { kind: "dark", color: background.color, foreground };
     }
     if (background.metrics.lightness > 214 && background.metrics.saturation < 0.24) {
       return { kind: "light", color: background.color };
     }
   } catch {}
   return null;
+}
+
+function shouldEnableDarkBackgroundMatteCleanup(imageType, sourceBackground) {
+  if (sourceBackground?.kind !== "dark") return false;
+  const type = normalizeImageType(imageType);
+  return type === "sticker"
+    || type === "line-art"
+    || (sourceBackground.foreground?.saturatedRatio || 0) > 0.12;
 }
 
 function getAlgorithmPreset(imageType = "unknown") {
