@@ -6,7 +6,7 @@ This file is for continuing the project from another Codex thread or device.
 
 - Repo: `wengzeyin/auto-cutout-tool`
 - Branch: `main`
-- Last confirmed sync: `2026-07-13`, local `main` includes product light-detail and photo dense-core regression patches.
+- Last confirmed sync: `2026-07-13`, local `main` includes source-connected dark exterior masking for black-background assets.
 - Pushed commits through `Polish UI icons and motion`:
   - `8da0f03 Improve split QA and Windows runner portability`
   - `Refine result-first UI workbench`
@@ -36,6 +36,7 @@ This file is for continuing the project from another Codex thread or device.
   - `Tighten dark background detail restore`
   - `Protect product interior light details`
   - `Tune photo dense core neighborhood`
+  - `Mask source-connected dark exteriors`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -50,7 +51,7 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 ## Current Continuation Notes
 
 - The latest algorithm work has focused on making quality regressions measurable before changing more core behavior.
-- Current pushed head before this patch: `Protect product interior light details`; latest local patch slightly relaxes photo dense-core normalization without changing the 15-image baseline score.
+- Current pushed head before this patch: `Tune photo dense core neighborhood`; latest local patch prevents black source backgrounds from being restored as outer outlines without changing the 15-image baseline score.
 - Safe next algorithm targets:
   - Continue performance work around actual AI fallback timeouts, cancellation, and large-image scan scheduling.
   - Improve real matte behavior for light illustration interiors beyond synthetic coverage.
@@ -70,6 +71,14 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - Lowered non-preserve photo dense-core neighbor requirement from 15 to 12 matching pixels.
 - Matte QA still protects isolated fine hair (`denseHairAfter` 132, `postEdgeHairAfter` 176).
 - Full browser QA on `2026-07-13 18:25` passed with 15/15 rows, average score 4.79, 0 release blockers, and no baseline regressions against `cutout-batch-20260713-1812.zip`.
+
+### Source-Connected Dark Exterior Masking - Done
+
+- Added a source-edge flood mask for dark backgrounds in `restoreIllustrationDetails()`.
+- Pixels that match the detected dark background and are connected to the original canvas edge are no longer allowed to be restored as protected black line art. This prevents black-background sticker uploads from gaining an artificial black outer outline after cutout/refinement.
+- Internal black text and line art remain protected when they are separated from the edge-connected dark background by the sticker/object fill.
+- Added matte regression coverage for an already-visible thick black rim: exterior rim alpha stays `0`, while internal black line art restores to alpha `235`.
+- Full browser QA on `2026-07-13 18:36` passed with 15/15 rows, average score 4.79, 0 release blockers, and no baseline regressions against `cutout-batch-20260713-1825.zip`.
 
 ## Already Implemented Before UI Pass
 

@@ -1,6 +1,6 @@
 # QA Run Summary
 
-Run time: 2026-07-13 18:25 Asia/Shanghai
+Run time: 2026-07-13 18:36 Asia/Shanghai
 
 Mode: mixed QA scenarios
 Export format: PNG / WebP / SVG validation
@@ -19,7 +19,7 @@ Export scale: 1x baseline with size checks
 - Line art risk: 0
 - Light region risk: 0
 - Semi-transparent core risk: 0
-- ZIP: `qa/run-output/cutout-batch-20260713-1825.zip`
+- ZIP: `qa/run-output/cutout-batch-20260713-1836.zip`
 - Raw report: `qa/run-output/qa-report.latest.json`
 - Browser QA metric coverage: SVG 7 / 7 rows, multi-element small metrics 4 / 4 rows
 
@@ -27,27 +27,30 @@ Export scale: 1x baseline with size checks
 
 | # | Image | Scenario | Type | Elements | Avg | Matte | Components | SVG | Edge | Semi Core | SVG Fractional | Small Clear | SVG Blocky |
 |---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| 01 | 01-portrait-hair-simulated.png | 人像发丝模拟 | photo | 1 | 4.75 | 5 | 5 | 4 | 0.0975 | 0.0623 |  |  | no |
-| 02 | 02-curly-hair-simulated.png | 卷发碎发模拟 | photo | 1 | 4.575 | 4.3 | 5 | 4 | 0.1007 | 0.2165 |  |  | no |
-| 03 | 03-pet-long-fur-simulated.png | 宠物长毛模拟 | photo | 1 | 4.75 | 5 | 5 | 4 | 0.1242 | 0.0705 |  |  | no |
-| 04 | 04-pet-short-fur-simulated.png | 宠物短毛模拟 | photo | 1 | 4.575 | 4.3 | 5 | 4 | 0.0782 | 0.1955 |  |  | no |
-| 05 | 05-light-product-white-bg.png | 白底浅色商品 | product | 1 | 5 | 5 | 5 | 5 | 0.1678 | 0.001 | 0.8085 |  | no |
-| 06 | 06-dark-product.png | 深色商品 | product | 1 | 5 | 5 | 5 | 5 | 0.1518 | 0.0032 | 0.809 |  | no |
-| 07 | 07-transparent-material.png | 透明材质 | transparentMaterial | 1 | 4.75 | 5 | 5 | 4 | 0.0513 | 0.893 |  |  | no |
-| 08 | 08-person-complex-bg.png | 复杂背景人物 | photo | 1 | 4.4 | 3.6 | 5 | 4 | 0.1058 | 0.2942 |  |  | no |
-| 09 | 09-product-complex-bg.png | 复杂背景商品 | product | 1 | 4.725 | 3.9 | 5 | 5 | 0.4275 | 0.0224 | 0.7057 |  | no |
-| 10 | 10-illustration-icons.png | 插画图标 | illustration | 6 | 5 | 5 | 5 | 5 | 0.117 | 0.0732 | 0.834 | 0 | no |
-| 11 | 11-sticker-pack.png | 多元素贴纸合集 | sticker | 9 | 5 | 5 | 5 | 5 | 0.1022 | 0.0251 | 0.8092 | 0 | no |
-| 12 | 12-nearby-characters.png | 靠近多角色 | sticker | 3 | 5 | 5 | 5 | 5 | 0.1487 | 0.0614 | 0.6703 | 0 | no |
-| 13 | 13-small-details.png | 小物体细节 | sticker | 14 | 4.575 | 4.3 | 5 | 4 | 0.1821 | 0.2167 | 0.8133 | 6 | no |
-| 14 | 14-logo-text-product.png | 文字 logo 商品 | product | 1 | 5 | 5 | 5 | 5 | 0.136 | 0.0292 | 0.8336 |  | no |
-| 15 | 15-high-contrast-edge.png | 高对比边缘 | illustration | 1 | 4.75 | 5 | 5 | 4 | 0.2993 | 0.0093 |  |  | no |
+| 01 | 01-portrait-hair-simulated.png | 人像发丝模拟 | photo | 1 | 4.75 | 5 | 5 | 4 | 0.0975 | 0.0622 | 0.2995 | 0 | no |
+| 02 | 02-curly-hair-simulated.png | 卷发碎发模拟 | photo | 1 | 4.575 | 4.3 | 5 | 4 | 0.1007 | 0.2165 | 0.2802 | 0 | no |
+| 03 | 03-pet-long-fur-simulated.png | 宠物长毛模拟 | photo | 1 | 4.75 | 5 | 5 | 4 | 0.1241 | 0.0704 | 0.516 | 0 | no |
+| 04 | 04-pet-short-fur-simulated.png | 宠物短毛模拟 | photo | 1 | 4.575 | 4.3 | 5 | 4 | 0.0781 | 0.1953 | 0.4595 | 0 | no |
+| 05 | 05-light-product-white-bg.png | 白底浅色商品 | product | 1 | 5 | 5 | 5 | 5 | 0.1678 | 0.001 | 0.463 | 0 | no |
+| 06 | 06-dark-product.png | 深色商品 | product | 1 | 5 | 5 | 5 | 5 | 0.1518 | 0.0032 | 0.4993 | 0 | no |
+| 07 | 07-transparent-material.png | 透明材质 | transparentMaterial | 1 | 4.75 | 5 | 5 | 4 | 0.07 | 0.9776 | 0.4433 | 0 | no |
+| 08 | 08-person-complex-bg.png | 复杂背景人物 | photo | 1 | 4.4 | 3.6 | 5 | 4 | 0.1058 | 0.2942 | 0.2255 | 0 | no |
+| 09 | 09-product-complex-bg.png | 复杂背景商品 | product | 1 | 4.725 | 3.9 | 5 | 5 | 0.4275 | 0.0224 | 0.5043 | 0 | no |
+| 10 | 10-illustration-icons.png | 插画图标 | illustration | 6 | 5 | 5 | 5 | 5 | 0.117 | 0.0732 | 0.8199 | 0 | no |
+| 11 | 11-sticker-pack.png | 多元素贴纸合集 | sticker | 9 | 5 | 5 | 5 | 5 | 0.1022 | 0.0251 | 0.8083 | 0 | no |
+| 12 | 12-nearby-characters.png | 靠近多角色 | sticker | 3 | 5 | 5 | 5 | 5 | 0.1487 | 0.0614 | 0.7366 | 0 | no |
+| 13 | 13-small-details.png | 小物体细节 | sticker | 14 | 4.575 | 4.3 | 5 | 4 | 0.1821 | 0.2167 | 0.8238 | 6 | no |
+| 14 | 14-logo-text-product.png | 文字 logo 商品 | product | 1 | 5 | 5 | 5 | 5 | 0.136 | 0.0292 | 0.5005 | 0 | no |
+| 15 | 15-high-contrast-edge.png | 高对比边缘 | illustration | 1 | 4.75 | 5 | 5 | 4 | 0.2993 | 0.0093 | 0.8352 | 0 | no |
 
 ## Findings
 
 - Full 15-image QA validation passed with average score 4.79 and 0 release blockers.
+- Added source-connected dark exterior masking for black-background assets. Dark pixels connected to the original canvas edge are no longer restored as protected line art, preventing black-background uploads from gaining an artificial black outer outline.
+- Added a matte regression for an already-visible thick black rim: `visibleDarkRimExteriorAfter` is 0, while internal black line art still restores to alpha 235.
+- Full browser QA kept the score baseline at 4.79 with no regressions against `cutout-batch-20260713-1825.zip`.
 - Lowered the non-preserve photo dense-core neighborhood requirement from 15 to 12 matching pixels. Dense interiors normalize slightly more readily, while matte QA still keeps isolated fine hair at alpha 132 and post-edge hair at alpha 176.
-- Full browser QA kept the score baseline at 4.79 with no regressions; tracked photo semi-transparent core nudged down on `01`, `03`, and `04` without changing component or SVG risk.
+- Tracked photo semi-transparent core stayed stable: `01` 0.0622, `03` 0.0704, and `04` 0.1953 without changing component or SVG risk.
 - Added a conservative product interior-light restoration guard: near-white product details are restored only when directional alpha support shows they are inside the subject. The new matte regression restores an interior product light strip to alpha 255 while keeping adjacent light background at alpha 0.
 - Tightened dark-background detail restoration for black-background sticker assets: source pixels matching the dark background are only restored as line art when they have real directional alpha support, preventing thick hidden black backgrounds from reappearing as outer outlines.
 - Added a matte regression for thick hidden black exterior strokes; `thickDarkRestoreExteriorAfter` stays at 0 while internal black line art remains protected.

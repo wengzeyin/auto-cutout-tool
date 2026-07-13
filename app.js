@@ -2446,6 +2446,7 @@ function restoreIllustrationDetails(cutoutCanvas, originalCanvas, settings) {
   }
   const restoreRadius = Math.max(2, Math.min(settings.preserveLineArt ? 8 : 5, Number(settings.edgeSmooth || 2) + 3));
   const nearForeground = dilateMask(foreground, width, height, restoreRadius);
+  const sourceDarkExteriorMask = buildSourceDarkExteriorMask(original, settings);
 
   let restoredPixels = 0;
   for (let index = 0; index < foreground.length; index += 1) {
@@ -2460,9 +2461,12 @@ function restoreIllustrationDetails(cutoutCanvas, originalCanvas, settings) {
     const x = index % width;
     const y = Math.floor(index / width);
     const sourceDarkBackgroundPixel = isSourceDarkBackgroundPixel(original.data, offset, metrics, settings);
+    const sourceDarkExteriorPixel = Boolean(sourceDarkExteriorMask?.[index]);
     const darkBackgroundExterior = sourceDarkBackgroundPixel
       && (
-        hasTransparentNeighbor(result.data, width, height, x, y, settings.darkFringeAggressive ? 9 : 6, 1)
+        sourceDarkExteriorPixel
+        || sourceHasDarkExteriorNeighbor(sourceDarkExteriorMask, width, height, x, y, settings.darkFringeAggressive ? 3 : 2)
+        || hasTransparentNeighbor(result.data, width, height, x, y, settings.darkFringeAggressive ? 9 : 6, 1)
         || !hasDirectionalAlphaSupport(result.data, width, height, x, y, 5, 96)
       );
     if (darkBackgroundExterior) {
@@ -2478,6 +2482,7 @@ function restoreIllustrationDetails(cutoutCanvas, originalCanvas, settings) {
     if (nearWhite && !protectedInteriorWhite) continue;
 
     const darkStroke = protectLineArt(metrics, settings)
+      && !sourceDarkExteriorPixel
       && (!sourceDarkBackgroundPixel || hasDirectionalAlphaSupport(result.data, width, height, x, y, 5, 96));
     const coloredFill = metrics.saturation > 0.24 && metrics.lightness < 242;
     const protectedLightFill = protectLightRegion(red, green, blue, metrics, settings);
@@ -2560,6 +2565,59 @@ function restoreIllustrationDetails(cutoutCanvas, originalCanvas, settings) {
 
   resultCtx.putImageData(result, 0, 0);
   return { canvas: cutoutCanvas, restoredPixels };
+}
+
+function buildSourceDarkExteriorMask(original, settings = {}) {
+  if (!settings.darkBackgroundCleanup || !original?.data?.length) return null;
+  const { width, height, data } = original;
+  const mask = new Uint8Array(width * height);
+  const stack = [];
+
+  const enqueue = (x, y) => {
+    if (x < 0 || x >= width || y < 0 || y >= height) return;
+    const index = y * width + x;
+    if (mask[index]) return;
+    const offset = index * 4;
+    const metrics = colorMetrics(data[offset], data[offset + 1], data[offset + 2]);
+    if (!isSourceDarkBackgroundPixel(data, offset, metrics, settings)) return;
+    mask[index] = 1;
+    stack.push(index);
+  };
+
+  for (let x = 0; x < width; x += 1) {
+    enqueue(x, 0);
+    enqueue(x, height - 1);
+  }
+  for (let y = 1; y < height - 1; y += 1) {
+    enqueue(0, y);
+    enqueue(width - 1, y);
+  }
+
+  while (stack.length) {
+    const index = stack.pop();
+    const x = index % width;
+    const y = Math.floor(index / width);
+    enqueue(x - 1, y);
+    enqueue(x + 1, y);
+    enqueue(x, y - 1);
+    enqueue(x, y + 1);
+  }
+
+  return mask;
+}
+
+function sourceHasDarkExteriorNeighbor(mask, width, height, x, y, radius) {
+  if (!mask) return false;
+  for (let oy = -radius; oy <= radius; oy += 1) {
+    const py = y + oy;
+    if (py < 0 || py >= height) continue;
+    for (let ox = -radius; ox <= radius; ox += 1) {
+      const px = x + ox;
+      if (px < 0 || px >= width || (px === x && py === y)) continue;
+      if (mask[py * width + px]) return true;
+    }
+  }
+  return false;
 }
 
 function protectLineArt(metrics, settings) {

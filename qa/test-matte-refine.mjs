@@ -757,6 +757,7 @@ function restoreIllustrationDetailsData(cutout, original, settings) {
   }
   const restoreRadius = Math.max(2, Math.min(settings.preserveLineArt ? 8 : 5, Number(settings.edgeSmooth || 2) + 3));
   const nearForeground = dilateMask(foreground, restoreRadius);
+  const sourceDarkExteriorMask = buildSourceDarkExteriorMask(original, settings);
 
   let restoredPixels = 0;
   for (let index = 0; index < foreground.length; index += 1) {
@@ -771,9 +772,12 @@ function restoreIllustrationDetailsData(cutout, original, settings) {
     const x = index % width;
     const y = Math.floor(index / width);
     const sourceDarkBackgroundPixel = isSourceDarkBackgroundPixel(original.data, offset, metrics, settings);
+    const sourceDarkExteriorPixel = Boolean(sourceDarkExteriorMask?.[index]);
     const darkBackgroundExterior = sourceDarkBackgroundPixel
       && (
-        hasTransparentNeighbor(cutout.data, x, y, settings.darkFringeAggressive ? 9 : 6, 1)
+        sourceDarkExteriorPixel
+        || sourceHasDarkExteriorNeighbor(sourceDarkExteriorMask, x, y, settings.darkFringeAggressive ? 3 : 2)
+        || hasTransparentNeighbor(cutout.data, x, y, settings.darkFringeAggressive ? 9 : 6, 1)
         || !hasDirectionalAlphaSupport(cutout.data, x, y, 5, 96)
       );
     if (darkBackgroundExterior) {
@@ -782,6 +786,7 @@ function restoreIllustrationDetailsData(cutout, original, settings) {
     }
 
     const darkStroke = protectLineArt(metrics, settings)
+      && !sourceDarkExteriorPixel
       && (!sourceDarkBackgroundPixel || hasDirectionalAlphaSupport(cutout.data, x, y, 5, 96));
     const coloredFill = metrics.saturation > 0.24 && metrics.lightness < 242;
     const protectedLightFill = protectLightRegion(red, green, blue, metrics, settings);
@@ -869,6 +874,54 @@ function restoreIllustrationDetailsData(cutout, original, settings) {
     }
   }
   return { image: cutout, restoredPixels };
+}
+
+function buildSourceDarkExteriorMask(original, settings = {}) {
+  if (!settings.darkBackgroundCleanup || !original?.data?.length) return null;
+  const mask = new Uint8Array(width * height);
+  const stack = [];
+  const enqueue = (x, y) => {
+    if (x < 0 || x >= width || y < 0 || y >= height) return;
+    const index = y * width + x;
+    if (mask[index]) return;
+    const offset = index * 4;
+    const metrics = colorMetrics(original.data[offset], original.data[offset + 1], original.data[offset + 2]);
+    if (!isSourceDarkBackgroundPixel(original.data, offset, metrics, settings)) return;
+    mask[index] = 1;
+    stack.push(index);
+  };
+  for (let x = 0; x < width; x += 1) {
+    enqueue(x, 0);
+    enqueue(x, height - 1);
+  }
+  for (let y = 1; y < height - 1; y += 1) {
+    enqueue(0, y);
+    enqueue(width - 1, y);
+  }
+  while (stack.length) {
+    const index = stack.pop();
+    const x = index % width;
+    const y = Math.floor(index / width);
+    enqueue(x - 1, y);
+    enqueue(x + 1, y);
+    enqueue(x, y - 1);
+    enqueue(x, y + 1);
+  }
+  return mask;
+}
+
+function sourceHasDarkExteriorNeighbor(mask, x, y, radius) {
+  if (!mask) return false;
+  for (let oy = -radius; oy <= radius; oy += 1) {
+    const py = y + oy;
+    if (py < 0 || py >= height) continue;
+    for (let ox = -radius; ox <= radius; ox += 1) {
+      const px = x + ox;
+      if (px < 0 || px >= width || (px === x && py === y)) continue;
+      if (mask[py * width + px]) return true;
+    }
+  }
+  return false;
 }
 
 function shouldProtectInteriorWhite(settings = {}) {
@@ -1127,6 +1180,29 @@ const thickDarkRestoreResult = restoreIllustrationDetailsData(thickDarkRestoreCu
   darkFringeAggressive: true,
   imageType: "sticker",
 });
+const visibleDarkRimOriginal = makeImageData([0, 0, 0, 255]);
+const visibleDarkRimCutout = makeImageData([0, 0, 0, 0]);
+const visibleExteriorRim = [];
+const visibleInteriorLine = [];
+fillRect(visibleDarkRimOriginal, 38, 30, 122, 94, [4, 4, 4, 255]);
+fillRect(visibleDarkRimCutout, 38, 30, 122, 94, [4, 4, 4, 255]);
+for (let y = 30; y <= 94; y += 1) {
+  for (let x = 38; x <= 122; x += 1) {
+    if (x >= 54 && x <= 106 && y >= 44 && y <= 80) continue;
+    visibleExteriorRim.push(y * width + x);
+  }
+}
+fillRect(visibleDarkRimOriginal, 54, 44, 106, 80, [255, 255, 255, 255]);
+fillRect(visibleDarkRimCutout, 54, 44, 106, 80, [255, 255, 255, 255]);
+fillRect(visibleDarkRimOriginal, 70, 60, 92, 63, [8, 8, 8, 255], visibleInteriorLine);
+fillRect(visibleDarkRimCutout, 70, 60, 92, 63, [8, 8, 8, 8]);
+const visibleDarkRimResult = restoreIllustrationDetailsData(visibleDarkRimCutout, visibleDarkRimOriginal, {
+  ...settings,
+  darkBackgroundCleanup: true,
+  darkBackgroundColor: [0, 0, 0],
+  darkFringeAggressive: true,
+  imageType: "sticker",
+});
 const semiCoreBefore = makeImageData([255, 255, 255, 0]);
 fillRect(semiCoreBefore, 22, 22, 42, 42, [80, 120, 160, 255]);
 fillRect(semiCoreBefore, 28, 28, 36, 36, [80, 120, 160, 118]);
@@ -1220,6 +1296,8 @@ const metrics = {
   darkRestoreExteriorAfter: averageAlpha(darkRestoreResult.image, darkRestoreExterior),
   darkRestoreInteriorLineAfter: averageAlpha(darkRestoreResult.image, darkRestoreInteriorLine),
   thickDarkRestoreExteriorAfter: averageAlpha(thickDarkRestoreResult.image, thickDarkRestoreExterior),
+  visibleDarkRimExteriorAfter: averageAlpha(visibleDarkRimResult.image, visibleExteriorRim),
+  visibleDarkRimInteriorLineAfter: averageAlpha(visibleDarkRimResult.image, visibleInteriorLine),
   semiCoreBefore: averageAlphaInRect(semiCoreBefore, 28, 28, 36, 36),
   semiCoreAfter: averageAlphaInRect(semiCoreAfter, 28, 28, 36, 36),
   semiEdgeAfter: averageAlphaInRect(semiCoreAfter, 72, 24, 88, 36),
@@ -1296,6 +1374,8 @@ if (metrics.darkInteriorLineAfter < 240) failures.push(`interior dark line was o
 if (metrics.darkRestoreExteriorAfter > 2) failures.push(`dark background exterior was restored as outline: ${metrics.darkRestoreExteriorAfter.toFixed(1)}`);
 if (metrics.darkRestoreInteriorLineAfter < 200) failures.push(`interior dark line was not restored: ${metrics.darkRestoreInteriorLineAfter.toFixed(1)}`);
 if (metrics.thickDarkRestoreExteriorAfter > 2) failures.push(`thick hidden black background outline was restored: ${metrics.thickDarkRestoreExteriorAfter.toFixed(1)}`);
+if (metrics.visibleDarkRimExteriorAfter > 2) failures.push(`visible source-connected dark rim was kept as outline: ${metrics.visibleDarkRimExteriorAfter.toFixed(1)}`);
+if (metrics.visibleDarkRimInteriorLineAfter < 200) failures.push(`interior black line inside sticker was over-cleared: ${metrics.visibleDarkRimInteriorLineAfter.toFixed(1)}`);
 if (metrics.semiCoreAfter < 250) failures.push(`semi-transparent core not normalized: ${metrics.semiCoreBefore.toFixed(1)} -> ${metrics.semiCoreAfter.toFixed(1)}`);
 if (metrics.semiEdgeAfter > 145) failures.push(`isolated semi-transparent edge was over-normalized: ${metrics.semiEdgeAfter.toFixed(1)}`);
 if (metrics.denseCoreAfter < 250) failures.push(`dense photo core was not normalized: ${metrics.denseCoreAfter.toFixed(1)}`);
