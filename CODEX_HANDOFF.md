@@ -6,6 +6,7 @@ This file is for continuing the project from another Codex thread or device.
 
 - Repo: `wengzeyin/auto-cutout-tool`
 - Branch: `main`
+- Last confirmed sync: `2026-07-13`, local `main` matches `origin/main` at `Track small element QA scores`.
 - Pushed commits through `Polish UI icons and motion`:
   - `8da0f03 Improve split QA and Windows runner portability`
   - `Refine result-first UI workbench`
@@ -31,6 +32,17 @@ This file is for continuing the project from another Codex thread or device.
 ## Product Direction
 
 UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimization, especially image type routing, matte protection, multi-element splitting, SVG quality, and QA regression coverage.
+
+## Current Continuation Notes
+
+- The latest algorithm work has focused on making quality regressions measurable before changing more core behavior.
+- Current pushed head: `Track small element QA scores`.
+- Safe next algorithm targets:
+  - Improve real matte behavior for light illustration interiors beyond synthetic coverage.
+  - Continue SVG quality work: path simplification, color-region merging, and fewer editable paths without blocky outlines.
+  - Add browser QA coverage that asserts the new metrics (`svgFractionalCoordinateRatio`, `clearSmallElementCount`, `smallElementScoreMax`, `smallElementScoreAverage`) appear in real generated reports.
+  - Tune multi-element splitting with real QA assets once full browser QA screenshots/reports are available.
+- Before changing algorithm thresholds, run the lightweight QA list at the bottom of this file. For larger behavior changes, run browser QA and compare against the previous report.
 
 ## Already Implemented Before UI Pass
 
