@@ -1,6 +1,6 @@
 # QA Run Summary
 
-Run time: 2026-07-13 18:36 Asia/Shanghai
+Run time: 2026-07-13 18:49 Asia/Shanghai
 
 Mode: mixed QA scenarios
 Export format: PNG / WebP / SVG validation
@@ -19,7 +19,7 @@ Export scale: 1x baseline with size checks
 - Line art risk: 0
 - Light region risk: 0
 - Semi-transparent core risk: 0
-- ZIP: `qa/run-output/cutout-batch-20260713-1836.zip`
+- ZIP: `qa/run-output/cutout-batch-20260713-1849.zip`
 - Raw report: `qa/run-output/qa-report.latest.json`
 - Browser QA metric coverage: SVG 7 / 7 rows, multi-element small metrics 4 / 4 rows
 
@@ -46,9 +46,11 @@ Export scale: 1x baseline with size checks
 ## Findings
 
 - Full 15-image QA validation passed with average score 4.79 and 0 release blockers.
+- Added SVG edge-band color merging for precise flat/vector artwork. Adjacent anti-aliased color bands now merge into the nearest editable fill region instead of exporting as separate line-like paths, while protected dark line art remains intact.
+- SVG regression `edgeBandGreenGroups` is now 1, `edgeBandPathCount` is 5, and protected dark line-art area remains 711.
+- Full browser QA kept the score baseline at 4.79 with no regressions against `cutout-batch-20260713-1836.zip`.
 - Added source-connected dark exterior masking for black-background assets. Dark pixels connected to the original canvas edge are no longer restored as protected line art, preventing black-background uploads from gaining an artificial black outer outline.
 - Added a matte regression for an already-visible thick black rim: `visibleDarkRimExteriorAfter` is 0, while internal black line art still restores to alpha 235.
-- Full browser QA kept the score baseline at 4.79 with no regressions against `cutout-batch-20260713-1825.zip`.
 - Lowered the non-preserve photo dense-core neighborhood requirement from 15 to 12 matching pixels. Dense interiors normalize slightly more readily, while matte QA still keeps isolated fine hair at alpha 132 and post-edge hair at alpha 176.
 - Tracked photo semi-transparent core stayed stable: `01` 0.0622, `03` 0.0704, and `04` 0.1953 without changing component or SVG risk.
 - Added a conservative product interior-light restoration guard: near-white product details are restored only when directional alpha support shows they are inside the subject. The new matte regression restores an interior product light strip to alpha 255 while keeping adjacent light background at alpha 0.
