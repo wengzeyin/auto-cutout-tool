@@ -116,6 +116,23 @@ const cases = [
     max: 5,
   },
   {
+    name: "clear-tiny-badges-near-large-stickers",
+    draw: (img) => {
+      for (const cx of [210, 485, 710]) {
+        ellipse(img, cx, 190, 62, 72, 255);
+        rect(img, cx - 48, 250, 96, 42, 245);
+        ellipse(img, cx, 300, 76, 14, 42);
+      }
+      ellipse(img, 298, 178, 11, 11, 255);
+      ellipse(img, 377, 224, 12, 10, 255);
+      ellipse(img, 579, 178, 11, 11, 255);
+      rect(img, 288, 190, 10, 7, 28);
+      rect(img, 565, 190, 10, 7, 28);
+    },
+    min: 6,
+    max: 7,
+  },
+  {
     name: "opaque-subjects-on-low-alpha-platform",
     draw: (img) => {
       for (const cx of [160, 330, 500, 670]) {
@@ -243,7 +260,7 @@ function findMultiObjectComponents(imageData, alphaThreshold, minArea, pad, opti
   let components = componentsFromLabels(labels, seeds.length, width, height, imageData, Math.max(24, alphaThreshold), pad)
     .filter((component) => keepMultiObjectComponent(component, imageArea, minArea));
   components = splitLargeComponents(components, imageData, coreMask, width, height, minCoreArea, pad, settings);
-  components = absorbTinyMultiObjectFragments(components, imageArea, minArea, settings);
+  components = absorbTinyMultiObjectFragments(components, imageData, minArea, settings);
   components = mergeAssetFragments(components, imageData, Math.max(24, alphaThreshold), settings);
   components = splitLargeComponents(components, imageData, coreMask, width, height, minCoreArea, pad, settings);
   components = stabilizeOverSplitComponents(components, imageData, coreMask, supportThreshold, minCoreArea, minArea, pad, settings);
@@ -990,13 +1007,18 @@ function findComponentsFromMask(mask, w, h, minArea, pad) {
   return components;
 }
 
-function absorbTinyMultiObjectFragments(components, imageArea, minArea, settings) {
+function absorbTinyMultiObjectFragments(components, imageData, minArea, settings) {
+  const imageArea = imageData.width * imageData.height;
   const sorted = [...components].sort((a, b) => b.area - a.area);
   const large = sorted.filter((component) => component.area >= Math.max(minArea, imageArea * 0.0012));
   const output = large.map((component) => ({ ...component }));
   const absorbDistance = Math.max(2, Math.round(Math.sqrt(imageArea) * (settings.absorbScale || 0.006)));
   for (const component of sorted) {
     if (large.includes(component)) continue;
+    if (hasClearStandaloneTinyComponent(component, output, imageData, minArea, settings, absorbDistance)) {
+      output.push({ ...component });
+      continue;
+    }
     if (component.area >= imageArea * 0.00065 && settings.mergeDistance <= 4) {
       output.push({ ...component });
       continue;
@@ -1006,6 +1028,24 @@ function absorbTinyMultiObjectFragments(components, imageArea, minArea, settings
     else output.push({ ...component });
   }
   return output;
+}
+
+function hasClearStandaloneTinyComponent(component, candidates, imageData, minArea, settings, absorbDistance) {
+  if ((settings.mergeDistance ?? 4) > 4 || !candidates.length) return false;
+  const alphaThreshold = Math.max(24, settings.supportBase || 22);
+  const measured = measureBoxAsComponent(component, imageData, alphaThreshold);
+  const imageArea = imageData.width * imageData.height;
+  const quality = scoreSmallComponent(measured, imageArea, minArea);
+  const minDimension = Math.min(measured.width, measured.height);
+  const strongRatio = measured.alphaArea ? measured.strongAlphaArea / measured.alphaArea : 0;
+  const compactCore = minDimension >= 7 && measured.alphaDensity >= 0.28 && strongRatio >= 0.5;
+  if (quality < 0.68 && !compactCore) return false;
+  const nearby = candidates
+    .map((candidate) => ({ candidate, distance: boxDistance(measured, candidate) }))
+    .filter((entry) => entry.distance <= Math.max(absorbDistance * 2.2, minDimension * 1.8))
+    .sort((a, b) => a.distance - b.distance);
+  if (!nearby.length) return false;
+  return nearby.some((entry) => hasRelaxedStandaloneSmallPartSeparation(measured, entry.candidate, imageData, alphaThreshold));
 }
 
 function stabilizeTinyFragmentBurst(components, imageData, minArea, settings) {
@@ -1393,6 +1433,23 @@ function isClearStandaloneSmallPart(smaller, larger, imageData, alphaThreshold) 
   if (!gap) return false;
   const gapDensity = alphaDensityInRect(imageData, gap, threshold);
   return gapDensity < 0.08;
+}
+
+function hasRelaxedStandaloneSmallPartSeparation(smaller, larger, imageData, alphaThreshold) {
+  const threshold = Math.max(72, alphaThreshold * 2.1);
+  const smallContent = strongContentBounds(smaller, imageData, threshold);
+  const largeContent = strongContentBounds(larger, imageData, threshold);
+  if (!smallContent || !largeContent) return false;
+  const minDimension = Math.min(smallContent.width, smallContent.height);
+  if (minDimension < 6 || smallContent.area < 18) return false;
+  const contentDistance = boxDistance(smallContent, largeContent);
+  const overlapX = axisOverlapRatio(smallContent.x, smallContent.width, largeContent.x, largeContent.width);
+  const overlapY = axisOverlapRatio(smallContent.y, smallContent.height, largeContent.y, largeContent.height);
+  const touchingTolerance = Math.max(1, minDimension * 0.08);
+  if (contentDistance <= touchingTolerance || (overlapX > 0.22 && overlapY > 0.22)) return false;
+  const gap = gapRectBetweenBoxes(smallContent, largeContent);
+  if (!gap) return false;
+  return alphaDensityInRect(imageData, gap, threshold) < 0.1;
 }
 
 function strongContentBounds(component, imageData, alphaThreshold) {

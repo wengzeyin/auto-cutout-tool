@@ -6,7 +6,7 @@ This file is for continuing the project from another Codex thread or device.
 
 - Repo: `wengzeyin/auto-cutout-tool`
 - Branch: `main`
-- Last confirmed sync: `2026-07-13`, local `main` matches `origin/main` at `Guard canvas readback performance`.
+- Last confirmed sync: `2026-07-13`, local `main` matches `origin/main` at `Add AI timeout guard`.
 - Pushed commits through `Polish UI icons and motion`:
   - `8da0f03 Improve split QA and Windows runner portability`
   - `Refine result-first UI workbench`
@@ -29,6 +29,7 @@ This file is for continuing the project from another Codex thread or device.
   - `Gate dark background matte cleanup`
   - `Clamp SVG cubic trace handles`
   - `Guard canvas readback performance`
+  - `Add AI timeout guard`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -43,12 +44,12 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 ## Current Continuation Notes
 
 - The latest algorithm work has focused on making quality regressions measurable before changing more core behavior.
-- Current pushed head: `Add AI timeout guard`.
+- Current pushed head: `Protect clear tiny split elements`.
 - Safe next algorithm targets:
   - Continue performance work around actual AI fallback timeouts, cancellation, and large-image scan scheduling.
   - Improve real matte behavior for light illustration interiors beyond synthetic coverage.
   - Continue SVG quality work: path simplification, color-region merging, and fewer editable paths without blocky outlines.
-  - Tune multi-element splitting with real QA assets once full browser QA screenshots/reports are available.
+  - Continue tuning multi-element splitting for real sticker packs: avoid both missed tiny assets and over-splitting body parts.
 - Before changing algorithm thresholds, run the lightweight QA list at the bottom of this file. For larger behavior changes, run browser QA and compare against the previous report.
 
 ## Already Implemented Before UI Pass
@@ -191,6 +192,14 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - Timeout duration scales for large images and can be shortened through `window.__cutoutDebug.aiTimeoutMs` for QA; default normal-image timeout is 180s.
 - Added `qa/test-ai-timeout-guard.mjs`, which simulates a non-solid image whose AI task never resolves and verifies the page recovers in under 1s, shows a timeout message, re-enables the process button, hides progress, and marks the queue item as failed.
 - Full browser QA on `2026-07-13 17:07` passed with 15/15 rows, average score 4.79, 0 release blockers, `consoleFailures: []`, and `consoleMessages: []`.
+- Baseline comparison passed with no regressions in score, component count, large-box risk, small-element risk, matte, or SVG metrics.
+
+### Clear Tiny Split Elements - Done
+
+- Added clear standalone tiny-element protection to the multi-object split absorption step. A small component with a compact strong-alpha core and a transparent gap from nearby large stickers is kept as its own element instead of being absorbed into the nearest large component.
+- Added `clear-tiny-badges-near-large-stickers` regression coverage in `qa/test-multi-split.mjs`; expected output is 6-7 elements, preserving small badges near three larger stickers.
+- Mirrored the production absorption and relaxed standalone-separation logic in the QA splitter so the regression exercises the real strategy.
+- Full browser QA on `2026-07-13 17:15` passed with 15/15 rows, average score 4.79, 0 release blockers, `consoleFailures: []`, and `consoleMessages: []`.
 - Baseline comparison passed with no regressions in score, component count, large-box risk, small-element risk, matte, or SVG metrics.
 
 ## UI Pass Plan
