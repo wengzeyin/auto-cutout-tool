@@ -138,6 +138,29 @@ const crackedPathCount = [...crackedGroups.values()].reduce((sum, group) => sum 
 if (crackedConnectedRegionCount !== 1) failures.push(`Expected same-color micro cracks to close into 1 connected green region, got ${crackedConnectedRegionCount}.`);
 if (crackedPathCount > 5) failures.push(`Expected cracked flat artwork to avoid extra SVG paths, got ${crackedPathCount}.`);
 
+const edgeBandBadge = makeEdgeBandBadgeImageData(240, 180);
+const edgeBandGroups = imageDataToVectorRegions(edgeBandBadge, 8, {
+  mode: "precise",
+  colorStep: 18,
+  minRegionRatio: 0.00001,
+  mergeTinyRatio: 0.00002,
+  simplify: 1.15,
+  smoothPasses: 2,
+  protectLineArt: true,
+  flattenAlpha: true,
+});
+const edgeBandGreenGroups = [...edgeBandGroups.entries()]
+  .filter(([key]) => keyIsGreen(key))
+  .map(([, group]) => group);
+const edgeBandProtectedDarkArea = [...edgeBandGroups.entries()]
+  .filter(([key]) => /^#/.test(key) && keyLightness(key) < 80)
+  .reduce((sum, [, group]) => sum + group.area, 0);
+const edgeBandPathCount = [...edgeBandGroups.values()].reduce((sum, group) => sum + group.regionCount, 0);
+
+if (edgeBandGreenGroups.length > 1) failures.push(`Expected adjacent green anti-alias color bands to merge into 1 editable fill group, got ${edgeBandGreenGroups.length}.`);
+if (edgeBandProtectedDarkArea < 70) failures.push(`Expected protected dark line art to survive edge-band merging, got area ${edgeBandProtectedDarkArea}.`);
+if (edgeBandPathCount > 8) failures.push(`Expected edge-band SVG to avoid line-like extra paths, got ${edgeBandPathCount}.`);
+
 const result = {
   pathCount,
   commandCount,
@@ -166,6 +189,9 @@ const result = {
   productFractionalCoordinateRatio: Math.round(productFractionalCoordinateRatio * 100) / 100,
   crackedConnectedRegionCount,
   crackedPathCount,
+  edgeBandGreenGroups: edgeBandGreenGroups.length,
+  edgeBandProtectedDarkArea,
+  edgeBandPathCount,
   pass: failures.length === 0,
   failures,
 };
@@ -265,6 +291,22 @@ function makeCrackedFlatImageData(width, height) {
   return img;
 }
 
+function makeEdgeBandBadgeImageData(width, height) {
+  const img = makeImageData(width, height);
+  ellipse(img, 116, 92, 58, 48, [96, 226, 166, 255]);
+  ellipse(img, 116, 92, 55, 45, [70, 212, 150, 255]);
+  ellipse(img, 116, 92, 52, 42, [52, 199, 134, 255]);
+  ellipse(img, 116, 92, 18, 16, [252, 252, 250, 255]);
+  rect(img, 84, 88, 64, 5, [18, 24, 38, 255]);
+  rect(img, 96, 70, 5, 44, [18, 24, 38, 255]);
+  rect(img, 130, 70, 5, 44, [18, 24, 38, 255]);
+  for (let x = 82; x <= 150; x += 6) {
+    setPixel(img, x, 95, [112, 112, 112, 210]);
+    setPixel(img, x + 1, 95, [112, 112, 112, 210]);
+  }
+  return img;
+}
+
 function seededNoise(index, salt) {
   const value = Math.sin(index * 127.1 + salt * 311.7) * 43758.5453123;
   return value - Math.floor(value);
@@ -293,12 +335,96 @@ function imageDataToVectorRegions(imageData, alphaThreshold, vectorSettings) {
   }
   stabilizeVectorColorKeys(keys, width, height, vectorSettings);
   closeVectorMicroGaps(keys, width, height, vectorSettings);
+  mergeVectorEdgeBands(keys, width, height, vectorSettings, mergeTinyArea);
   const finalRegions = collectVectorRegions(keys, width, height);
   for (const region of finalRegions) {
     if (region.pixels.length < minRegionArea) continue;
     appendVectorRegion(groups, region.key, region.pixels, keys, width, height, vectorSettings);
   }
   return groups;
+}
+
+function mergeVectorEdgeBands(keys, width, height, vectorSettings = {}, mergeTinyArea = 4) {
+  if (vectorSettings.mode === "fast" || (!vectorSettings.flattenAlpha && vectorSettings.mode !== "precise")) return;
+  const totalArea = width * height;
+  const maxBandArea = Math.max(mergeTinyArea * 8, Math.round(totalArea * (vectorSettings.edgeBandMergeRatio || 0.038)));
+  for (let pass = 0; pass < 2; pass += 1) {
+    let changed = 0;
+    const regions = collectVectorRegions(keys, width, height);
+    for (const region of regions) {
+      if (region.pixels.length <= mergeTinyArea || region.pixels.length > maxBandArea) continue;
+      if (vectorSettings.protectLineArt && isDarkVectorKey(region.key)) continue;
+      const bounds = vectorRegionBounds(region.pixels, width);
+      const boxArea = Math.max(1, (bounds.maxX - bounds.minX + 1) * (bounds.maxY - bounds.minY + 1));
+      const density = region.pixels.length / boxArea;
+      if (density > 0.34) continue;
+      const neighbor = dominantNeighborVectorKey(region.pixels, keys, width, height, region.key);
+      if (!neighbor?.key) continue;
+      if (vectorSettings.protectLineArt && isDarkVectorKey(neighbor.key)) continue;
+      const contactRatio = neighbor.count / Math.max(1, region.pixels.length);
+      if (contactRatio < 0.08) continue;
+      if (!vectorKeysCloseForBandMerge(region.key, neighbor.key, vectorSettings)) continue;
+      for (const pixel of region.pixels) keys[pixel] = neighbor.key;
+      changed += 1;
+    }
+    if (!changed) break;
+  }
+}
+
+function vectorRegionBounds(pixels, width) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const index of pixels) {
+    const x = index % width;
+    const y = Math.floor(index / width);
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+function dominantNeighborVectorKey(pixels, keys, width, height, ownKey) {
+  const counts = new Map();
+  for (const index of pixels) {
+    const x = index % width;
+    const y = Math.floor(index / width);
+    for (const next of [x > 0 ? index - 1 : -1, x < width - 1 ? index + 1 : -1, y > 0 ? index - width : -1, y < height - 1 ? index + width : -1]) {
+      const key = next >= 0 ? keys[next] : null;
+      if (!key || key === ownKey) continue;
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+  }
+  const [key, count] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0] || [];
+  return key ? { key, count } : null;
+}
+
+function vectorKeysCloseForBandMerge(keyA, keyB, vectorSettings = {}) {
+  const rgbA = vectorKeyRgb(keyA);
+  const rgbB = vectorKeyRgb(keyB);
+  if (!rgbA || !rgbB) return false;
+  const distance = Math.sqrt(((rgbA[0] - rgbB[0]) ** 2 + (rgbA[1] - rgbB[1]) ** 2 + (rgbA[2] - rgbB[2]) ** 2) / 3);
+  if (distance <= (vectorSettings.protectLineArt ? 72 : 88)) return true;
+  const metricsA = colorMetrics(rgbA[0], rgbA[1], rgbA[2]);
+  const metricsB = colorMetrics(rgbB[0], rgbB[1], rgbB[2]);
+  const similarHue = Math.abs(rgbA[0] - rgbB[0]) < 62
+    && Math.abs(rgbA[1] - rgbB[1]) < 62
+    && Math.abs(rgbA[2] - rgbB[2]) < 62
+    && Math.abs(metricsA.saturation - metricsB.saturation) < 0.22;
+  return similarHue && Math.abs(metricsA.lightness - metricsB.lightness) < 54;
+}
+
+function vectorKeyRgb(key = "") {
+  const hex = key.split("|")[0] || "";
+  if (!/^#[0-9a-f]{6}$/i.test(hex)) return null;
+  return [
+    parseInt(hex.slice(1, 3), 16),
+    parseInt(hex.slice(3, 5), 16),
+    parseInt(hex.slice(5, 7), 16),
+  ];
 }
 
 function collectVectorRegions(keys, width, height) {
