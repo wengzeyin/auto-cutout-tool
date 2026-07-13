@@ -460,6 +460,13 @@ function colorDistanceToRgbSq(data, offset, color) {
   return (dr * dr + dg * dg + db * db) / 3;
 }
 
+function isSourceDarkBackgroundPixel(originalData, offset, metrics, settings = {}) {
+  if (!settings.darkBackgroundCleanup) return false;
+  const backgroundColor = Array.isArray(settings.darkBackgroundColor) ? settings.darkBackgroundColor : [0, 0, 0];
+  const distance = Math.sqrt(colorDistanceToRgbSq(originalData, offset, backgroundColor));
+  return distance <= 132 || (metrics.lightness < 112 && metrics.saturation < 0.28);
+}
+
 function hasColoredOpaqueNeighbor(data, x, y, radius, threshold) {
   for (let oy = -radius; oy <= radius; oy += 1) {
     const py = y + oy;
@@ -698,6 +705,12 @@ function restoreIllustrationDetailsData(cutout, original, settings) {
     const protectedWarmOrCool = protectWarmCoolDetail(red, green, blue, metrics, settings);
     const x = index % width;
     const y = Math.floor(index / width);
+    const sourceDarkBackgroundPixel = isSourceDarkBackgroundPixel(original.data, offset, metrics, settings)
+      && hasTransparentNeighbor(cutout.data, x, y, 3, 1);
+    if (sourceDarkBackgroundPixel) {
+      cutout.data[offset + 3] = 0;
+      continue;
+    }
     const protectedInteriorWhite = nearWhite
       && shouldProtectInteriorWhite(settings)
       && (
@@ -971,6 +984,28 @@ suppressDarkBackgroundFringeAlpha(darkHaloAfter, {
   darkBackgroundColor: [0, 0, 0],
   darkFringeAggressive: true,
 });
+const darkRestoreOriginal = makeImageData([0, 0, 0, 255]);
+const darkRestoreCutout = makeImageData([0, 0, 0, 0]);
+const darkRestoreExterior = [];
+const darkRestoreInteriorLine = [];
+fillRect(darkRestoreOriginal, 50, 40, 110, 84, [8, 8, 8, 255]);
+for (let y = 40; y <= 84; y += 1) {
+  for (let x = 50; x <= 110; x += 1) {
+    if (x >= 54 && x <= 106 && y >= 44 && y <= 80) continue;
+    darkRestoreExterior.push(y * width + x);
+  }
+}
+fillRect(darkRestoreOriginal, 54, 44, 106, 80, [255, 255, 255, 255]);
+fillRect(darkRestoreCutout, 54, 44, 106, 80, [255, 255, 255, 255]);
+fillRect(darkRestoreOriginal, 70, 60, 92, 63, [8, 8, 8, 255], darkRestoreInteriorLine);
+fillRect(darkRestoreCutout, 70, 60, 92, 63, [8, 8, 8, 8]);
+const darkRestoreResult = restoreIllustrationDetailsData(darkRestoreCutout, darkRestoreOriginal, {
+  ...settings,
+  darkBackgroundCleanup: true,
+  darkBackgroundColor: [0, 0, 0],
+  darkFringeAggressive: true,
+  imageType: "sticker",
+});
 const semiCoreBefore = makeImageData([255, 255, 255, 0]);
 fillRect(semiCoreBefore, 22, 22, 42, 42, [80, 120, 160, 255]);
 fillRect(semiCoreBefore, 28, 28, 36, 36, [80, 120, 160, 118]);
@@ -1026,6 +1061,8 @@ const metrics = {
   darkHaloBefore: averageAlpha(darkHaloBefore, darkExteriorHalo),
   darkHaloAfter: averageAlpha(darkHaloAfter, darkExteriorHalo),
   darkInteriorLineAfter: averageAlpha(darkHaloAfter, darkInteriorLine),
+  darkRestoreExteriorAfter: averageAlpha(darkRestoreResult.image, darkRestoreExterior),
+  darkRestoreInteriorLineAfter: averageAlpha(darkRestoreResult.image, darkRestoreInteriorLine),
   semiCoreBefore: averageAlphaInRect(semiCoreBefore, 28, 28, 36, 36),
   semiCoreAfter: averageAlphaInRect(semiCoreAfter, 28, 28, 36, 36),
   semiEdgeAfter: averageAlphaInRect(semiCoreAfter, 72, 24, 88, 36),
@@ -1093,6 +1130,8 @@ if (metrics.lowAlphaStickerFringeAfter > 1) failures.push(`low alpha sticker fri
 if (metrics.lowAlphaStickerInteriorAfter < metrics.lowAlphaStickerInteriorBefore * 0.7) failures.push(`interior white sticker detail over-cleared: ${metrics.lowAlphaStickerInteriorBefore.toFixed(1)} -> ${metrics.lowAlphaStickerInteriorAfter.toFixed(1)}`);
 if (metrics.darkHaloAfter > 4) failures.push(`dark background halo not cleared: ${metrics.darkHaloBefore.toFixed(1)} -> ${metrics.darkHaloAfter.toFixed(1)}`);
 if (metrics.darkInteriorLineAfter < 240) failures.push(`interior dark line was over-cleared: ${metrics.darkInteriorLineAfter.toFixed(1)}`);
+if (metrics.darkRestoreExteriorAfter > 2) failures.push(`dark background exterior was restored as outline: ${metrics.darkRestoreExteriorAfter.toFixed(1)}`);
+if (metrics.darkRestoreInteriorLineAfter < 200) failures.push(`interior dark line was not restored: ${metrics.darkRestoreInteriorLineAfter.toFixed(1)}`);
 if (metrics.semiCoreAfter < 250) failures.push(`semi-transparent core not normalized: ${metrics.semiCoreBefore.toFixed(1)} -> ${metrics.semiCoreAfter.toFixed(1)}`);
 if (metrics.semiEdgeAfter > 145) failures.push(`isolated semi-transparent edge was over-normalized: ${metrics.semiEdgeAfter.toFixed(1)}`);
 if (metrics.glassCoreAfter > 238) failures.push(`transparent material core over-normalized: ${metrics.glassCoreBefore.toFixed(1)} -> ${metrics.glassCoreAfter.toFixed(1)}`);

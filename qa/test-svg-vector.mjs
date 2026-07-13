@@ -120,6 +120,24 @@ if (productCommandDensity > 8) failures.push(`Expected product SVG command densi
 if (productGridAlignedRatio > 0.62) failures.push(`Expected product SVG to reduce grid alignment, got ${productGridAlignedRatio.toFixed(2)}.`);
 if (productFractionalCoordinateRatio < 0.34) failures.push(`Expected product SVG to keep fractional coordinates, got ${productFractionalCoordinateRatio.toFixed(2)}.`);
 
+const crackedFlat = makeCrackedFlatImageData(220, 160);
+const crackedGroups = imageDataToVectorRegions(crackedFlat, 8, {
+  mode: "precise",
+  colorStep: 24,
+  minRegionRatio: 0.00001,
+  mergeTinyRatio: 0.00002,
+  simplify: 1.1,
+  smoothPasses: 2,
+  protectLineArt: false,
+  flattenAlpha: true,
+});
+const crackedFillKey = [...crackedGroups.keys()].find((key) => keyIsGreen(key));
+const crackedConnectedRegionCount = crackedFillKey ? crackedGroups.get(crackedFillKey).connectedRegionCount : 0;
+const crackedPathCount = [...crackedGroups.values()].reduce((sum, group) => sum + group.regionCount, 0);
+
+if (crackedConnectedRegionCount !== 1) failures.push(`Expected same-color micro cracks to close into 1 connected green region, got ${crackedConnectedRegionCount}.`);
+if (crackedPathCount > 5) failures.push(`Expected cracked flat artwork to avoid extra SVG paths, got ${crackedPathCount}.`);
+
 const result = {
   pathCount,
   commandCount,
@@ -146,6 +164,8 @@ const result = {
   productCommandDensity: Math.round(productCommandDensity * 100) / 100,
   productGridAlignedRatio: Math.round(productGridAlignedRatio * 100) / 100,
   productFractionalCoordinateRatio: Math.round(productFractionalCoordinateRatio * 100) / 100,
+  crackedConnectedRegionCount,
+  crackedPathCount,
   pass: failures.length === 0,
   failures,
 };
@@ -234,6 +254,17 @@ function makeProductLikeImageData(width, height) {
   return img;
 }
 
+function makeCrackedFlatImageData(width, height) {
+  const img = makeImageData(width, height);
+  rect(img, 38, 42, 58, 66, [52, 199, 134, 255]);
+  rect(img, 108, 42, 58, 66, [52, 199, 134, 255]);
+  rect(img, 94, 68, 18, 11, [52, 199, 134, 255]);
+  rect(img, 102, 71, 1, 5, [0, 0, 0, 0]);
+  rect(img, 56, 62, 3, 3, [255, 255, 255, 255]);
+  rect(img, 142, 88, 4, 4, [17, 24, 39, 255]);
+  return img;
+}
+
 function seededNoise(index, salt) {
   const value = Math.sin(index * 127.1 + salt * 311.7) * 43758.5453123;
   return value - Math.floor(value);
@@ -252,6 +283,7 @@ function imageDataToVectorRegions(imageData, alphaThreshold, vectorSettings) {
     keys[index] = vectorColorKey(data[offset], data[offset + 1], data[offset + 2], data[offset + 3], colorStep, vectorSettings);
   }
   stabilizeVectorColorKeys(keys, width, height, vectorSettings);
+  closeVectorMicroGaps(keys, width, height, vectorSettings);
   const firstPass = collectVectorRegions(keys, width, height);
   for (const region of firstPass) {
     if (region.pixels.length < mergeTinyArea) {
@@ -260,6 +292,7 @@ function imageDataToVectorRegions(imageData, alphaThreshold, vectorSettings) {
     }
   }
   stabilizeVectorColorKeys(keys, width, height, vectorSettings);
+  closeVectorMicroGaps(keys, width, height, vectorSettings);
   const finalRegions = collectVectorRegions(keys, width, height);
   for (const region of finalRegions) {
     if (region.pixels.length < minRegionArea) continue;
@@ -342,6 +375,64 @@ function stabilizeVectorColorKeys(keys, width, height, vectorSettings = {}) {
   for (let index = 0; index < keys.length; index += 1) keys[index] = current[index];
 }
 
+function closeVectorMicroGaps(keys, width, height, vectorSettings = {}) {
+  if (vectorSettings.mode === "fast") return;
+  const next = keys.slice();
+  const maxRun = vectorSettings.mode === "precise" ? 5 : 3;
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const index = y * width + x;
+      if (keys[index]) continue;
+      const fillKey = microGapFillKey(keys, width, height, x, y, maxRun);
+      if (fillKey) next[index] = fillKey;
+    }
+  }
+  for (let index = 0; index < keys.length; index += 1) keys[index] = next[index];
+}
+
+function microGapFillKey(keys, width, height, x, y, maxRun) {
+  const index = y * width + x;
+  const horizontal = keys[index - 1] && keys[index - 1] === keys[index + 1] ? keys[index - 1] : "";
+  if (
+    horizontal &&
+    transparentRunLength(keys, width, height, x, y, "x") <= maxRun &&
+    transparentRunLength(keys, width, height, x, y, "y") <= maxRun &&
+    sameKeyNeighborSupport(keys, width, height, x, y, horizontal) >= 2
+  ) return horizontal;
+  const vertical = keys[index - width] && keys[index - width] === keys[index + width] ? keys[index - width] : "";
+  if (
+    vertical &&
+    transparentRunLength(keys, width, height, x, y, "y") <= maxRun &&
+    transparentRunLength(keys, width, height, x, y, "x") <= maxRun &&
+    sameKeyNeighborSupport(keys, width, height, x, y, vertical) >= 2
+  ) return vertical;
+  return "";
+}
+
+function transparentRunLength(keys, width, height, x, y, axis) {
+  let length = 1;
+  if (axis === "x") {
+    for (let xx = x - 1; xx >= 0 && !keys[y * width + xx]; xx -= 1) length += 1;
+    for (let xx = x + 1; xx < width && !keys[y * width + xx]; xx += 1) length += 1;
+    return length;
+  }
+  for (let yy = y - 1; yy >= 0 && !keys[yy * width + x]; yy -= 1) length += 1;
+  for (let yy = y + 1; yy < height && !keys[yy * width + x]; yy += 1) length += 1;
+  return length;
+}
+
+function sameKeyNeighborSupport(keys, width, height, x, y, key) {
+  let support = 0;
+  for (let yy = y - 1; yy <= y + 1; yy += 1) {
+    if (yy < 0 || yy >= height) continue;
+    for (let xx = x - 1; xx <= x + 1; xx += 1) {
+      if (xx < 0 || xx >= width || (xx === x && yy === y)) continue;
+      if (keys[yy * width + xx] === key) support += 1;
+    }
+  }
+  return support;
+}
+
 function isDarkVectorKey(key = "") {
   const hex = key.split("|")[0] || "";
   if (!/^#[0-9a-f]{6}$/i.test(hex)) return false;
@@ -367,7 +458,7 @@ function nearestNeighborVectorKey(pixels, keys, width, height, ownKey) {
 function appendVectorRegion(groups, key, pixels, keys, width, height, vectorSettings) {
   let group = groups.get(key);
   if (!group) {
-    group = { path: "", area: 0, regionCount: 0 };
+    group = { path: "", area: 0, regionCount: 0, connectedRegionCount: 0 };
     groups.set(key, group);
   }
   const loops = traceRegionLoops(pixels, keys, key, width, height);
@@ -378,6 +469,7 @@ function appendVectorRegion(groups, key, pixels, keys, width, height, vectorSett
   group.path += path;
   group.area += pixels.length;
   group.regionCount += loops.length;
+  group.connectedRegionCount += 1;
 }
 
 function traceRegionLoops(pixels, keys, key, width, height) {
@@ -735,6 +827,15 @@ function keyIsBlue(key) {
   const green = parseInt(hex.slice(3, 5), 16);
   const blue = parseInt(hex.slice(5, 7), 16);
   return blue > red + 60 && blue > green + 24;
+}
+
+function keyIsGreen(key) {
+  const hex = key.split("|")[0] || "";
+  if (!/^#[0-9a-f]{6}$/i.test(hex)) return false;
+  const red = parseInt(hex.slice(1, 3), 16);
+  const green = parseInt(hex.slice(3, 5), 16);
+  const blue = parseInt(hex.slice(5, 7), 16);
+  return green > 150 && green > red + 55 && green > blue + 20;
 }
 
 function keySaturation(key) {

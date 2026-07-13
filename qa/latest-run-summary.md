@@ -1,6 +1,6 @@
 # QA Run Summary
 
-Run time: 2026-07-13 17:15 Asia/Shanghai
+Run time: 2026-07-13 17:35 Asia/Shanghai
 
 Mode: mixed QA scenarios
 Export format: PNG / WebP / SVG validation
@@ -19,7 +19,7 @@ Export scale: 1x baseline with size checks
 - Line art risk: 0
 - Light region risk: 0
 - Semi-transparent core risk: 0
-- ZIP: `qa/run-output/cutout-batch-20260713-1715.zip`
+- ZIP: `qa/run-output/cutout-batch-20260713-1735.zip`
 - Raw report: `qa/run-output/qa-report.latest.json`
 - Browser QA metric coverage: SVG 7 / 7 rows, multi-element small metrics 4 / 4 rows
 
@@ -54,6 +54,8 @@ Export scale: 1x baseline with size checks
 - Added readback-safe canvas context creation for pixel-scanning canvases and a browser QA gate for Canvas `willReadFrequently` warnings; this run completed with `consoleFailures: []` and `consoleMessages: []`.
 - Added AI background-removal timeout protection plus a browser regression test that simulates a hanging model; the UI recovers in under 1s, re-enables processing, hides progress, and marks the queue item as failed.
 - Added clear standalone tiny-element protection in multi-object split mode. Small badges/icons with strong alpha cores and a transparent gap near larger stickers are preserved instead of being absorbed into the large element.
+- Added SVG micro-gap closing for flat vector regions. Same-color regions split by tiny transparent cracks now close back into one connected filled area; SVG QA asserts `crackedConnectedRegionCount: 1`.
+- Added a dark-background restore guard so source pixels matching a black background and touching true transparent exterior are not restored as line art. The new matte regression keeps exterior black outline alpha at 0 while preserving internal black lines at alpha 235.
 - Added browser QA metric coverage gates for `svgFractionalCoordinateRatio`, `clearSmallElementCount`, `smallElementScoreMax`, and `smallElementScoreAverage`.
 - Added local IMG.LY model-resource proxy/cache for localhost QA to avoid flaky browser-side CDN fetch failures.
 - Added repeated vertical sticker-stack splitting; `11-sticker-pack.png` now exports 9 elements instead of the failed 3-column grouping.
@@ -61,7 +63,7 @@ Export scale: 1x baseline with size checks
 - Reduced light-solid flood tolerance so beige/light subjects are no longer swallowed into the white background mask.
 - Added complex-background product image-type routing for low-complexity colored-background product graphics, plus regression coverage that keeps flat illustrations from being misclassified.
 - Added product-only smooth-edge matte retry: high-jaggedness product mattes can be refined with cleaner edge settings, but the result is accepted only when light regions, line art, core opacity, white fringe, and coverage stay stable.
-- Added product SVG grid relaxation and cubic handle clamping: product SVG command density stayed unchanged, while product `svgGridAlignedRatio` improved across all product QA rows (`05` 0.6560 -> 0.5045, `06` 0.6386 -> 0.4705, `09` 0.5704 -> 0.4239, `14` 0.5973 -> 0.4081).
+- Added product SVG grid relaxation, cubic handle clamping, and micro-gap closing: product SVG command density stayed stable, while product `svgGridAlignedRatio` improved across all product QA rows (`05` 0.6560 -> 0.4099, `06` 0.6386 -> 0.4110, `09` 0.5704 -> 0.4239, `14` 0.5973 -> 0.3875).
 - QA comparison against the previous baseline passed with no regressions in score, component count, large-box risk, small-element risk, matte, or SVG metrics.
 - Current algorithmic limiting cases remain: photo-like semi-transparent core on curly/short fur and complex-background person, product edge jaggedness, and complex-background product light-region loss.
 

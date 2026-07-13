@@ -2388,6 +2388,12 @@ function restoreIllustrationDetails(cutoutCanvas, originalCanvas, settings) {
     const nearWhite = metrics.lightness > 246 && metrics.saturation < 0.12;
     const x = index % width;
     const y = Math.floor(index / width);
+    const sourceDarkBackgroundPixel = isSourceDarkBackgroundPixel(original.data, offset, metrics, settings)
+      && hasTransparentNeighbor(result.data, width, height, x, y, 3, 1);
+    if (sourceDarkBackgroundPixel) {
+      result.data[offset + 3] = 0;
+      continue;
+    }
     const protectedInteriorWhite = nearWhite
       && shouldProtectInteriorWhite(settings)
       && (
@@ -6811,6 +6817,7 @@ function imageDataToVectorRegions(imageData, alphaThreshold, vectorSettings = ge
   }
 
   stabilizeVectorColorKeys(keys, width, height, vectorSettings);
+  closeVectorMicroGaps(keys, width, height, vectorSettings);
 
   const firstPass = collectVectorRegions(keys, width, height);
   for (const region of firstPass) {
@@ -6823,6 +6830,7 @@ function imageDataToVectorRegions(imageData, alphaThreshold, vectorSettings = ge
   }
 
   stabilizeVectorColorKeys(keys, width, height, vectorSettings);
+  closeVectorMicroGaps(keys, width, height, vectorSettings);
 
   const finalRegions = collectVectorRegions(keys, width, height);
   for (const region of finalRegions) {
@@ -6918,6 +6926,64 @@ function stabilizeVectorColorKeys(keys, width, height, vectorSettings = {}) {
   for (let index = 0; index < keys.length; index += 1) keys[index] = current[index];
 }
 
+function closeVectorMicroGaps(keys, width, height, vectorSettings = {}) {
+  if (vectorSettings.mode === "fast") return;
+  const next = keys.slice();
+  const maxRun = vectorSettings.mode === "precise" ? 5 : 3;
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const index = y * width + x;
+      if (keys[index]) continue;
+      const fillKey = microGapFillKey(keys, width, height, x, y, maxRun);
+      if (fillKey) next[index] = fillKey;
+    }
+  }
+  for (let index = 0; index < keys.length; index += 1) keys[index] = next[index];
+}
+
+function microGapFillKey(keys, width, height, x, y, maxRun) {
+  const index = y * width + x;
+  const horizontal = keys[index - 1] && keys[index - 1] === keys[index + 1] ? keys[index - 1] : "";
+  if (
+    horizontal &&
+    transparentRunLength(keys, width, height, x, y, "x") <= maxRun &&
+    transparentRunLength(keys, width, height, x, y, "y") <= maxRun &&
+    sameKeyNeighborSupport(keys, width, height, x, y, horizontal) >= 2
+  ) return horizontal;
+  const vertical = keys[index - width] && keys[index - width] === keys[index + width] ? keys[index - width] : "";
+  if (
+    vertical &&
+    transparentRunLength(keys, width, height, x, y, "y") <= maxRun &&
+    transparentRunLength(keys, width, height, x, y, "x") <= maxRun &&
+    sameKeyNeighborSupport(keys, width, height, x, y, vertical) >= 2
+  ) return vertical;
+  return "";
+}
+
+function transparentRunLength(keys, width, height, x, y, axis) {
+  let length = 1;
+  if (axis === "x") {
+    for (let xx = x - 1; xx >= 0 && !keys[y * width + xx]; xx -= 1) length += 1;
+    for (let xx = x + 1; xx < width && !keys[y * width + xx]; xx += 1) length += 1;
+    return length;
+  }
+  for (let yy = y - 1; yy >= 0 && !keys[yy * width + x]; yy -= 1) length += 1;
+  for (let yy = y + 1; yy < height && !keys[yy * width + x]; yy += 1) length += 1;
+  return length;
+}
+
+function sameKeyNeighborSupport(keys, width, height, x, y, key) {
+  let support = 0;
+  for (let yy = y - 1; yy <= y + 1; yy += 1) {
+    if (yy < 0 || yy >= height) continue;
+    for (let xx = x - 1; xx <= x + 1; xx += 1) {
+      if (xx < 0 || xx >= width || (xx === x && yy === y)) continue;
+      if (keys[yy * width + xx] === key) support += 1;
+    }
+  }
+  return support;
+}
+
 function isDarkVectorKey(key = "") {
   const hex = key.split("|")[0] || "";
   if (!/^#[0-9a-f]{6}$/i.test(hex)) return false;
@@ -6949,7 +7015,7 @@ function nearestNeighborVectorKey(pixels, keys, width, height, ownKey) {
 function appendVectorRegion(groups, key, pixels, keys, width, height, vectorSettings = getVectorSettings()) {
   let group = groups.get(key);
   if (!group) {
-    group = { path: "", area: 0, regionCount: 0 };
+    group = { path: "", area: 0, regionCount: 0, connectedRegionCount: 0 };
     groups.set(key, group);
   }
   const loops = traceRegionLoops(pixels, keys, key, width, height);
@@ -6963,6 +7029,7 @@ function appendVectorRegion(groups, key, pixels, keys, width, height, vectorSett
   group.path += path;
   group.area += pixels.length;
   group.regionCount += loops.length;
+  group.connectedRegionCount += 1;
 }
 
 function traceRegionLoops(pixels, keys, key, width, height) {

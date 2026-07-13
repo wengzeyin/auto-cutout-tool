@@ -6,7 +6,7 @@ This file is for continuing the project from another Codex thread or device.
 
 - Repo: `wengzeyin/auto-cutout-tool`
 - Branch: `main`
-- Last confirmed sync: `2026-07-13`, local `main` matches `origin/main` at `Add AI timeout guard`.
+- Last confirmed sync: `2026-07-13`, local `main` matches `origin/main` at `Protect clear tiny split elements`.
 - Pushed commits through `Polish UI icons and motion`:
   - `8da0f03 Improve split QA and Windows runner portability`
   - `Refine result-first UI workbench`
@@ -30,6 +30,8 @@ This file is for continuing the project from another Codex thread or device.
   - `Clamp SVG cubic trace handles`
   - `Guard canvas readback performance`
   - `Add AI timeout guard`
+  - `Protect clear tiny split elements`
+  - `Close SVG micro gaps and guard dark restore`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -44,7 +46,7 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 ## Current Continuation Notes
 
 - The latest algorithm work has focused on making quality regressions measurable before changing more core behavior.
-- Current pushed head: `Protect clear tiny split elements`.
+- Current pushed head: `Close SVG micro gaps and guard dark restore`.
 - Safe next algorithm targets:
   - Continue performance work around actual AI fallback timeouts, cancellation, and large-image scan scheduling.
   - Improve real matte behavior for light illustration interiors beyond synthetic coverage.
@@ -201,6 +203,21 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - Mirrored the production absorption and relaxed standalone-separation logic in the QA splitter so the regression exercises the real strategy.
 - Full browser QA on `2026-07-13 17:15` passed with 15/15 rows, average score 4.79, 0 release blockers, `consoleFailures: []`, and `consoleMessages: []`.
 - Baseline comparison passed with no regressions in score, component count, large-box risk, small-element risk, matte, or SVG metrics.
+
+### SVG Micro Gap Closing - Done
+
+- Added `closeVectorMicroGaps()` after vector color-key stabilization so tiny transparent cracks inside the same flat color are closed before region tracing.
+- Added `connectedRegionCount` to vector groups so QA can distinguish actual connected filled regions from holes/loops.
+- Added a cracked flat-art SVG regression in `qa/test-svg-vector.mjs`; the green same-color region now reports `crackedConnectedRegionCount: 1` and `crackedPathCount: 5`.
+- Full browser QA on `2026-07-13 17:35` passed with 15/15 rows, average score 4.79, 0 release blockers, `consoleFailures: []`, and `consoleMessages: []`.
+- Baseline comparison passed with no regressions; product `svgGridAlignedRatio` improved to `05` 0.4099, `06` 0.4110, `09` 0.4239, and `14` 0.3875.
+
+### Dark Background Restore Guard - Done
+
+- Prevented `restoreIllustrationDetails()` from restoring source pixels that match a detected black background and touch true transparent exterior. This avoids the app drawing black outlines back around black-background sticker assets after AI/refine cleanup.
+- The guard uses near-zero transparent exterior as the signal, so internal black text and line art are still restored.
+- Added a matte regression in `qa/test-matte-refine.mjs`: exterior black outline alpha stays `0`, while the internal dark line restores to alpha `235`.
+- Black solid-background browser regression still passes for `black`, `black-halo`, and `white` cases with `darkHaloRatio` 0 and no IMG.LY model-resource requests.
 
 ## UI Pass Plan
 
