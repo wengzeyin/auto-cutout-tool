@@ -80,6 +80,17 @@ function protectLightRegion(red, green, blue, metrics, settings) {
   return notWhiteBackground && hasColorBias && metrics.lightness >= 168 && metrics.lightness < 246 && metrics.saturation > 0.045;
 }
 
+function protectProductLightRegion(red, green, blue, metrics, settings) {
+  if (settings.imageType !== "product") return false;
+  if (metrics.lightness < 186 || metrics.lightness > 252) return false;
+  const max = Math.max(red, green, blue);
+  const min = Math.min(red, green, blue);
+  const spread = max - min;
+  const neutralHighlight = metrics.lightness > 236 && metrics.saturation < 0.18;
+  const tintedSurface = metrics.lightness > 232 && spread > 8 && metrics.saturation > 0.035 && metrics.saturation < 0.22;
+  return neutralHighlight || tintedSurface;
+}
+
 function protectWarmCoolDetail(red, green, blue, metrics, settings) {
   if (!settings.preserveLightRegions) return false;
   return (
@@ -785,9 +796,11 @@ function restoreIllustrationDetailsData(cutout, original, settings) {
       && metrics.lightness >= 224
       && metrics.lightness < 248
       && isOriginalEnclosedLightDetail(original.data, x, y, 7);
+    const protectedProductLightFill = protectProductLightRegion(red, green, blue, metrics, settings)
+      && hasDirectionalAlphaSupport(cutout.data, x, y, 5, 72);
     if (nearWhite && !protectedInteriorWhite) continue;
 
-    if (alpha > 18 && (darkStroke || coloredFill || protectedLightFill || protectedWarmOrCool || protectedInteriorWhite || protectedPaleInterior)) {
+    if (alpha > 18 && (darkStroke || coloredFill || protectedLightFill || protectedWarmOrCool || protectedInteriorWhite || protectedPaleInterior || protectedProductLightFill)) {
       cutout.data[offset] = red;
       cutout.data[offset + 1] = green;
       cutout.data[offset + 2] = blue;
@@ -840,6 +853,12 @@ function restoreIllustrationDetailsData(cutout, original, settings) {
       cutout.data[offset + 1] = green;
       cutout.data[offset + 2] = blue;
       cutout.data[offset + 3] = Math.max(alpha, protectedInteriorWhite ? 210 : 150);
+      restoredPixels += 1;
+    } else if (protectedProductLightFill && alpha < 160) {
+      cutout.data[offset] = red;
+      cutout.data[offset + 1] = green;
+      cutout.data[offset + 2] = blue;
+      cutout.data[offset + 3] = Math.max(alpha, hasDirectionalAlphaSupport(cutout.data, x, y, 5, 96) ? 255 : 180);
       restoredPixels += 1;
     } else if (protectedInteriorWhite && alpha < 190) {
       cutout.data[offset] = red;
@@ -977,6 +996,25 @@ const settings = {
 
 const refined = refineAlpha(cutout, settings);
 const restored = restoreIllustrationDetailsData(refined, original, settings);
+const productOriginal = makeImageData([250, 220, 110, 255]);
+const productCutout = makeImageData([250, 220, 110, 0]);
+const productInteriorLight = [];
+const productBackgroundLight = [];
+fillRect(productOriginal, 42, 28, 118, 94, [248, 250, 246, 255]);
+fillRect(productCutout, 42, 28, 118, 94, [248, 250, 246, 255]);
+fillRect(productOriginal, 76, 48, 84, 72, [238, 246, 232, 255], productInteriorLight);
+fillRect(productCutout, 76, 48, 84, 72, [238, 246, 232, 0]);
+fillRect(productOriginal, 28, 48, 39, 72, [244, 224, 118, 255], productBackgroundLight);
+fillRect(productCutout, 28, 48, 39, 72, [244, 224, 118, 0]);
+const productRestored = restoreIllustrationDetailsData(productCutout, productOriginal, {
+  cleanup: 24,
+  preserveLineArt: false,
+  preserveLightRegions: false,
+  preserveColoredDetails: false,
+  edgeSmooth: 2,
+  imageType: "product",
+  preset: "product",
+});
 const jaggedBefore = makeImageData([255, 255, 255, 0]);
 for (let y = 18; y < height - 18; y += 1) {
   const left = 38 + Math.floor(y / 6) % 2;
@@ -1156,6 +1194,8 @@ const metrics = {
   coreAlpha: averageAlpha(restored.image, core),
   lightAlpha: averageAlpha(restored.image, lightFace),
   missingLightAlpha: averageAlpha(restored.image, missingLightFace),
+  productInteriorLightAlpha: averageAlpha(productRestored.image, productInteriorLight),
+  productBackgroundLightAlpha: averageAlpha(productRestored.image, productBackgroundLight),
   lineAlpha: averageAlpha(restored.image, lineArt),
   lineCoverage: alphaCoverage(restored.image, lineArt, 180),
   warmAlpha: averageAlpha(restored.image, warmFlame),
@@ -1238,6 +1278,8 @@ const failures = [];
 if (metrics.coreAlpha < 240) failures.push(`core alpha too low: ${metrics.coreAlpha.toFixed(1)}`);
 if (metrics.lightAlpha < 175) failures.push(`light region not preserved: ${metrics.lightAlpha.toFixed(1)}`);
 if (metrics.missingLightAlpha < 150) failures.push(`missing interior light region not restored: ${metrics.missingLightAlpha.toFixed(1)}`);
+if (metrics.productInteriorLightAlpha < 170) failures.push(`product interior light region not restored: ${metrics.productInteriorLightAlpha.toFixed(1)}`);
+if (metrics.productBackgroundLightAlpha > 2) failures.push(`product background light region was restored: ${metrics.productBackgroundLightAlpha.toFixed(1)}`);
 if (metrics.lineCoverage < 0.82) failures.push(`line art coverage too low: ${(metrics.lineCoverage * 100).toFixed(1)}%`);
 if (metrics.warmAlpha < 150) failures.push(`warm detail not restored: ${metrics.warmAlpha.toFixed(1)}`);
 if (metrics.whiteFlameCoreAlpha < 175) failures.push(`enclosed white flame core not restored: ${metrics.whiteFlameCoreAlpha.toFixed(1)}`);

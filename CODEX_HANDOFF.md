@@ -6,7 +6,7 @@ This file is for continuing the project from another Codex thread or device.
 
 - Repo: `wengzeyin/auto-cutout-tool`
 - Branch: `main`
-- Last confirmed sync: `2026-07-13`, local `main` includes the dark-background outline restoration fix.
+- Last confirmed sync: `2026-07-13`, local `main` includes the dark-background outline restoration fix and product light-detail regression patch.
 - Pushed commits through `Polish UI icons and motion`:
   - `8da0f03 Improve split QA and Windows runner portability`
   - `Refine result-first UI workbench`
@@ -34,6 +34,7 @@ This file is for continuing the project from another Codex thread or device.
   - `Close SVG micro gaps and guard dark restore`
   - `Normalize photo dense core alpha`
   - `Tighten dark background detail restore`
+  - `Protect product interior light details`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -48,13 +49,20 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 ## Current Continuation Notes
 
 - The latest algorithm work has focused on making quality regressions measurable before changing more core behavior.
-- Current pushed head before this handoff edit: `Normalize photo dense core alpha`; latest local patch fixes thick black-background outline restoration.
+- Current pushed head before this patch: `Tighten dark background detail restore`; latest local patch protects product interior light details without changing the 15-image baseline metrics.
 - Safe next algorithm targets:
   - Continue performance work around actual AI fallback timeouts, cancellation, and large-image scan scheduling.
   - Improve real matte behavior for light illustration interiors beyond synthetic coverage.
   - Continue SVG quality work: path simplification, color-region merging, and fewer editable paths without blocky outlines.
   - Continue tuning multi-element splitting for real sticker packs: avoid both missed tiny assets and over-splitting body parts.
 - Before changing algorithm thresholds, run the lightweight QA list at the bottom of this file. For larger behavior changes, run browser QA and compare against the previous report.
+
+### Product Interior Light Details - Done
+
+- Added a conservative product-specific light restoration guard in `restoreIllustrationDetails()`.
+- Product light pixels are restored only when they look like near-white/tinted product surface and have directional alpha support from the existing cutout, avoiding restoration of adjacent light backgrounds.
+- Added matte regression coverage: an internal near-white product strip restores to alpha 255, while a nearby light background strip remains alpha 0.
+- Full browser QA on `2026-07-13 18:12` passed with 15/15 rows, average score 4.79, 0 release blockers, and no baseline regressions against `cutout-batch-20260713-1757.zip`.
 
 ## Already Implemented Before UI Pass
 

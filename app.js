@@ -2486,8 +2486,10 @@ function restoreIllustrationDetails(cutoutCanvas, originalCanvas, settings) {
       && metrics.lightness >= 224
       && metrics.lightness < 248
       && isOriginalEnclosedLightDetail(original.data, width, height, x, y, 7);
+    const protectedProductLightFill = protectProductLightRegion(red, green, blue, metrics, settings)
+      && hasDirectionalAlphaSupport(result.data, width, height, x, y, 5, 72);
 
-    if (alpha > 18 && (darkStroke || coloredFill || protectedLightFill || protectedWarmOrCool || protectedInteriorWhite || protectedPaleInterior)) {
+    if (alpha > 18 && (darkStroke || coloredFill || protectedLightFill || protectedWarmOrCool || protectedInteriorWhite || protectedPaleInterior || protectedProductLightFill)) {
       result.data[offset] = red;
       result.data[offset + 1] = green;
       result.data[offset + 2] = blue;
@@ -2541,6 +2543,12 @@ function restoreIllustrationDetails(cutoutCanvas, originalCanvas, settings) {
       result.data[offset + 2] = blue;
       result.data[offset + 3] = Math.max(alpha, protectedInteriorWhite ? 210 : 150);
       restoredPixels += 1;
+    } else if (protectedProductLightFill && alpha < 160) {
+      result.data[offset] = red;
+      result.data[offset + 1] = green;
+      result.data[offset + 2] = blue;
+      result.data[offset + 3] = Math.max(alpha, hasDirectionalAlphaSupport(result.data, width, height, x, y, 5, 96) ? 255 : 180);
+      restoredPixels += 1;
     } else if (protectedInteriorWhite && alpha < 190) {
       result.data[offset] = red;
       result.data[offset + 1] = green;
@@ -2564,6 +2572,17 @@ function protectLightRegion(red, green, blue, metrics, settings) {
   const notWhiteBackground = !(metrics.lightness > 246 && metrics.saturation < 0.12);
   const hasColorBias = Math.max(red, green, blue) - Math.min(red, green, blue) > 10;
   return notWhiteBackground && hasColorBias && metrics.lightness >= 168 && metrics.lightness < 246 && metrics.saturation > 0.045;
+}
+
+function protectProductLightRegion(red, green, blue, metrics, settings) {
+  if (settings.imageType !== "product") return false;
+  if (metrics.lightness < 186 || metrics.lightness > 252) return false;
+  const max = Math.max(red, green, blue);
+  const min = Math.min(red, green, blue);
+  const spread = max - min;
+  const neutralHighlight = metrics.lightness > 236 && metrics.saturation < 0.18;
+  const tintedSurface = metrics.lightness > 232 && spread > 8 && metrics.saturation > 0.035 && metrics.saturation < 0.22;
+  return neutralHighlight || tintedSurface;
 }
 
 function protectWarmCoolDetail(red, green, blue, metrics, settings) {
