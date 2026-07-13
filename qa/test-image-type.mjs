@@ -23,6 +23,21 @@ const cases = [
     },
   },
   {
+    name: "flat-product-on-colored-bg",
+    expected: "product",
+    draw: (img) => {
+      fill(img, [88, 158, 230, 255]);
+      rect(img, 66, 24, 174, 144, [12, 12, 12, 255]);
+      rect(img, 88, 40, 130, 112, [246, 229, 190, 255]);
+      for (let y = 54; y <= 134; y += 20) rect(img, 104, y, 14, 12, [255, 255, 255, 255]);
+      rect(img, 132, 58, 58, 8, [226, 210, 178, 255]);
+      rect(img, 132, 82, 58, 8, [226, 210, 178, 255]);
+      rect(img, 132, 106, 58, 8, [226, 210, 178, 255]);
+      rect(img, 132, 130, 58, 8, [226, 210, 178, 255]);
+      softNoise(img, 88, 40, 130, 112, 10);
+    },
+  },
+  {
     name: "color-sticker-on-white",
     expected: "sticker",
     draw: (img) => {
@@ -277,6 +292,17 @@ function analyzeImageType(imageData) {
     foregroundRatio < 0.55 &&
     lowSatRatio > 0.62 &&
     saturatedForegroundRatio < 0.22
+  ) return "product";
+  if (
+    whiteRatio < 0.26 &&
+    foregroundRatio > 0.62 &&
+    foregroundRatio < 0.99 &&
+    uniqueRatio < 0.08 &&
+    edgeRatio < 0.028 &&
+    averageGradient < 18 &&
+    darkForegroundRatio > 0.18 &&
+    lightColoredForegroundRatio > 0.12 &&
+    saturatedForegroundRatio > 0.28
   ) return "product";
   if (uniqueRatio < 0.24 && (saturatedRatio > 0.16 || edgeRatio > 0.08)) return "illustration";
   if (averageGradient > 32 && edgeRatio > 0.04) return "photo";

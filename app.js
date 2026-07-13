@@ -940,6 +940,17 @@ function analyzeSourceImageType(sourceCanvas) {
     lowSatRatio > 0.62 &&
     saturatedForegroundRatio < 0.22
   ) return "product";
+  if (
+    whiteRatio < 0.26 &&
+    foregroundRatio > 0.62 &&
+    foregroundRatio < 0.99 &&
+    uniqueRatio < 0.08 &&
+    edgeRatio < 0.028 &&
+    averageGradient < 18 &&
+    darkForegroundRatio > 0.18 &&
+    lightColoredForegroundRatio > 0.12 &&
+    saturatedForegroundRatio > 0.28
+  ) return "product";
   if (uniqueRatio < 0.24 && (saturatedRatio > 0.16 || edgeRatio > 0.08)) return "illustration";
   if (averageGradient > 32 && edgeRatio > 0.04) return "photo";
   if (uniqueRatio < 0.3) return "illustration";
@@ -1863,6 +1874,19 @@ async function refineAndPreviewCutout({ immediateScan = true } = {}) {
     state.matteWarnings = quality.warnings;
   }
 
+  if (shouldRetryWithSmoothEdgeMatte(quality, baseSettings)) {
+    const smoothSettings = buildSmoothEdgeMatteProfile(baseSettings);
+    const smoothRefine = await refineCutoutAlphaAsync(state.cutoutOriginalCanvas, smoothSettings);
+    const smoothDetails = restoreIllustrationDetails(smoothRefine.canvas, state.sourceOriginalCanvas, smoothSettings);
+    const smoothQuality = analyzeMatteQuality(smoothDetails.canvas, state.sourceOriginalCanvas, smoothSettings);
+    if (shouldUseSmoothEdgeMatte(quality, smoothQuality, baseSettings)) {
+      refineResult = smoothRefine;
+      detailResult = smoothDetails;
+      quality = smoothQuality;
+      state.matteWarnings = ["已自动优化商品边缘平滑度。", ...quality.warnings];
+    }
+  }
+
   state.refinedCutoutCanvas = detailResult.canvas;
   state.alphaNormalized = refineResult.alphaNormalized;
   state.cutoutBlob = await canvasToBlob(state.refinedCutoutCanvas);
@@ -2426,6 +2450,45 @@ function shouldRetryWithPreserveMatte(quality, settings) {
   if (illustrationLike && quality.lightRegionLossRatio > 0.18) return true;
   if (quality.semiTransparentCoreRatio > 0.36) return true;
   return false;
+}
+
+function shouldRetryWithSmoothEdgeMatte(quality, settings) {
+  if (!quality || settings.imageType !== "product" || settings.edgeOptimized) return false;
+  if (settings.fidelity === "preserve") return false;
+  return quality.edgeJaggednessScore > 0.38 || quality.whiteFringeRatio > 0.075;
+}
+
+function buildSmoothEdgeMatteProfile(settings) {
+  return {
+    ...settings,
+    edgeOptimized: true,
+    fidelity: "clean",
+    alphaBoost: "clean",
+    edgeSmooth: Math.min(4, Number(settings.edgeSmooth || 0) + 1),
+    feather: Math.min(3, Number(settings.feather || 0) + 1),
+    cleanup: Math.max(Number(settings.cleanup || 0), 32),
+    residueThreshold: Math.max(Number(settings.residueThreshold || 0), 30),
+    edgeLow: Math.max(10, Math.round(Number(settings.edgeLow || settings.cleanup || 24) * 0.82)),
+    coreThreshold: Math.min(Number(settings.coreThreshold || 198), 176),
+    solidThreshold: Math.min(Number(settings.solidThreshold || 198), 176),
+    midBoost: Math.max(Number(settings.midBoost || 1.08), 1.16),
+    despeckleStrength: Math.max(Number(settings.despeckleStrength || 1), 1.18),
+  };
+}
+
+function shouldUseSmoothEdgeMatte(primaryQuality, smoothQuality, settings = {}) {
+  if (!primaryQuality || !smoothQuality || settings.imageType !== "product") return false;
+  const edgeImproved = (
+    smoothQuality.edgeJaggednessScore < primaryQuality.edgeJaggednessScore - 0.035 ||
+    smoothQuality.edgeJaggednessScore < primaryQuality.edgeJaggednessScore * 0.88
+  );
+  if (!edgeImproved && smoothQuality.whiteFringeRatio >= primaryQuality.whiteFringeRatio * 0.92) return false;
+  const keepsCoverage = smoothQuality.alphaCoverage >= primaryQuality.alphaCoverage * 0.965;
+  const keepsCore = smoothQuality.semiTransparentCoreRatio <= primaryQuality.semiTransparentCoreRatio + 0.08;
+  const keepsLight = smoothQuality.lightRegionLossRatio <= primaryQuality.lightRegionLossRatio + 0.055;
+  const keepsLine = smoothQuality.lineArtLossRatio <= primaryQuality.lineArtLossRatio + 0.045;
+  const keepsFringe = smoothQuality.whiteFringeRatio <= primaryQuality.whiteFringeRatio + 0.04;
+  return keepsCoverage && keepsCore && keepsLight && keepsLine && keepsFringe;
 }
 
 function shouldUseFallbackMatte(primaryQuality, fallbackQuality, settings = {}) {

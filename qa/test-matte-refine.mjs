@@ -185,6 +185,45 @@ function shouldUseFallbackMatte(primaryQuality, fallbackQuality, settings = {}) 
   return fallbackPenalty < primaryPenalty * 0.98 || improvesCritical;
 }
 
+function shouldRetryWithSmoothEdgeMatte(quality, settings) {
+  if (!quality || settings.imageType !== "product" || settings.edgeOptimized) return false;
+  if (settings.fidelity === "preserve") return false;
+  return quality.edgeJaggednessScore > 0.38 || quality.whiteFringeRatio > 0.075;
+}
+
+function buildSmoothEdgeMatteProfile(settings) {
+  return {
+    ...settings,
+    edgeOptimized: true,
+    fidelity: "clean",
+    alphaBoost: "clean",
+    edgeSmooth: Math.min(4, Number(settings.edgeSmooth || 0) + 1),
+    feather: Math.min(3, Number(settings.feather || 0) + 1),
+    cleanup: Math.max(Number(settings.cleanup || 0), 32),
+    residueThreshold: Math.max(Number(settings.residueThreshold || 0), 30),
+    edgeLow: Math.max(10, Math.round(Number(settings.edgeLow || settings.cleanup || 24) * 0.82)),
+    coreThreshold: Math.min(Number(settings.coreThreshold || 198), 176),
+    solidThreshold: Math.min(Number(settings.solidThreshold || 198), 176),
+    midBoost: Math.max(Number(settings.midBoost || 1.08), 1.16),
+    despeckleStrength: Math.max(Number(settings.despeckleStrength || 1), 1.18),
+  };
+}
+
+function shouldUseSmoothEdgeMatte(primaryQuality, smoothQuality, settings = {}) {
+  if (!primaryQuality || !smoothQuality || settings.imageType !== "product") return false;
+  const edgeImproved = (
+    smoothQuality.edgeJaggednessScore < primaryQuality.edgeJaggednessScore - 0.035 ||
+    smoothQuality.edgeJaggednessScore < primaryQuality.edgeJaggednessScore * 0.88
+  );
+  if (!edgeImproved && smoothQuality.whiteFringeRatio >= primaryQuality.whiteFringeRatio * 0.92) return false;
+  const keepsCoverage = smoothQuality.alphaCoverage >= primaryQuality.alphaCoverage * 0.965;
+  const keepsCore = smoothQuality.semiTransparentCoreRatio <= primaryQuality.semiTransparentCoreRatio + 0.08;
+  const keepsLight = smoothQuality.lightRegionLossRatio <= primaryQuality.lightRegionLossRatio + 0.055;
+  const keepsLine = smoothQuality.lineArtLossRatio <= primaryQuality.lineArtLossRatio + 0.045;
+  const keepsFringe = smoothQuality.whiteFringeRatio <= primaryQuality.whiteFringeRatio + 0.04;
+  return keepsCoverage && keepsCore && keepsLight && keepsLine && keepsFringe;
+}
+
 function matteQualityPenalty(quality, settings = {}) {
   const illustrationLike = settings.imageType === "illustration" || settings.imageType === "line-art" || settings.imageType === "sticker";
   const lineWeight = illustrationLike ? 3.2 : 1.2;
@@ -902,6 +941,35 @@ const metrics = {
     { lineArtLossRatio: 0.08, lightRegionLossRatio: 0.1, semiTransparentCoreRatio: 0.1, whiteFringeRatio: 0.035, edgeJaggednessScore: 0.19 },
     { imageType: "illustration" },
   ),
+  smoothRetryProduct: shouldRetryWithSmoothEdgeMatte(
+    { edgeJaggednessScore: 0.44, whiteFringeRatio: 0.02 },
+    { imageType: "product", fidelity: "balanced" },
+  ),
+  smoothRetryIllustration: shouldRetryWithSmoothEdgeMatte(
+    { edgeJaggednessScore: 0.48, whiteFringeRatio: 0.02 },
+    { imageType: "illustration", fidelity: "balanced" },
+  ),
+  smoothProfileEdgeSmooth: buildSmoothEdgeMatteProfile({
+    imageType: "product",
+    edgeSmooth: 2,
+    feather: 1,
+    cleanup: 28,
+    residueThreshold: 28,
+    edgeLow: 20,
+    coreThreshold: 198,
+    solidThreshold: 198,
+    midBoost: 1.08,
+  }).edgeSmooth,
+  smoothImprovedAccepted: shouldUseSmoothEdgeMatte(
+    { alphaCoverage: 0.4, edgeJaggednessScore: 0.46, semiTransparentCoreRatio: 0.06, lightRegionLossRatio: 0.08, lineArtLossRatio: 0.02, whiteFringeRatio: 0.025 },
+    { alphaCoverage: 0.392, edgeJaggednessScore: 0.35, semiTransparentCoreRatio: 0.08, lightRegionLossRatio: 0.1, lineArtLossRatio: 0.03, whiteFringeRatio: 0.03 },
+    { imageType: "product" },
+  ),
+  smoothLightLossRejected: shouldUseSmoothEdgeMatte(
+    { alphaCoverage: 0.4, edgeJaggednessScore: 0.46, semiTransparentCoreRatio: 0.06, lightRegionLossRatio: 0.08, lineArtLossRatio: 0.02, whiteFringeRatio: 0.025 },
+    { alphaCoverage: 0.392, edgeJaggednessScore: 0.31, semiTransparentCoreRatio: 0.08, lightRegionLossRatio: 0.19, lineArtLossRatio: 0.03, whiteFringeRatio: 0.03 },
+    { imageType: "product" },
+  ),
 };
 
 const failures = [];
@@ -929,6 +997,11 @@ if (metrics.residueAlpha > 1) failures.push(`background residue remains: ${metri
 if (metrics.restoredPixels < 100) failures.push(`restored pixel count too low: ${metrics.restoredPixels}`);
 if (metrics.fallbackAccepted) failures.push("fallback decision accepted a worse white-fringe result");
 if (!metrics.fallbackImprovedAccepted) failures.push("fallback decision rejected a clear line/light improvement");
+if (!metrics.smoothRetryProduct) failures.push("smooth edge decision did not retry a jagged product matte");
+if (metrics.smoothRetryIllustration) failures.push("smooth edge decision should not retry illustration line art as a product edge");
+if (metrics.smoothProfileEdgeSmooth !== 3) failures.push(`smooth edge profile did not raise edgeSmooth to 3: ${metrics.smoothProfileEdgeSmooth}`);
+if (!metrics.smoothImprovedAccepted) failures.push("smooth edge decision rejected a clear product edge improvement");
+if (metrics.smoothLightLossRejected) failures.push("smooth edge decision accepted a result with too much light-region loss");
 
 const result = {
   pass: failures.length === 0,

@@ -6,7 +6,7 @@ This file is for continuing the project from another Codex thread or device.
 
 - Repo: `wengzeyin/auto-cutout-tool`
 - Branch: `main`
-- Last confirmed sync: `2026-07-13`, local `main` matches `origin/main` at `Cover solid background fast cutout`.
+- Last confirmed sync: `2026-07-13`, local `main` matches `origin/main` at `Improve product matte routing`.
 - Pushed commits through `Polish UI icons and motion`:
   - `8da0f03 Improve split QA and Windows runner portability`
   - `Refine result-first UI workbench`
@@ -24,6 +24,7 @@ This file is for continuing the project from another Codex thread or device.
   - `Track small element QA scores`
   - `Add browser QA metric coverage and local model proxy`
   - `Add solid background fast cutout`
+  - `Improve product matte routing`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -38,7 +39,7 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 ## Current Continuation Notes
 
 - The latest algorithm work has focused on making quality regressions measurable before changing more core behavior.
-- Current pushed head: `Cover solid background fast cutout`.
+- Current pushed head: `Improve product matte routing`.
 - Safe next algorithm targets:
   - Improve real matte behavior for light illustration interiors beyond synthetic coverage.
   - Continue SVG quality work: path simplification, color-region merging, and fewer editable paths without blocky outlines.
@@ -136,6 +137,14 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - Added `qa/test-solid-background-fast-cutout.mjs` to assert black and white solid-background mocks finish quickly, keep transparent corners, avoid IMG.LY model requests, and do not create black edge halos.
 - Browser regression test: black-background sticker mock completed in ~0.31s with `darkHaloRatio` 0; white paper mock completed in ~0.21s with no model-resource requests.
 - Full browser QA on `2026-07-13 15:39` passed with 15/15 rows, average score 4.79, and no baseline regressions.
+
+### Product Matte Routing - Done
+
+- Added a complex-background product image-type heuristic for low-complexity, low-gradient product-like graphics on colored/non-white backgrounds, reducing false routing into the illustration pipeline.
+- Added `flat-product-on-colored-bg` regression coverage in `qa/test-image-type.mjs` while preserving the existing flat-illustration, sticker, photo, line-art, product, and transparent-material cases.
+- Added product-only smooth-edge matte retry logic: when product matte analysis sees high edge jaggedness or white-fringe risk, the app tries a cleaner/smoother product profile and adopts it only if edge quality improves without materially increasing light-region loss, line loss, semi-transparent core, white fringe, or alpha coverage loss.
+- Added decision coverage for smooth-edge retry/accept/reject paths in `qa/test-matte-refine.mjs`.
+- Full browser QA on `2026-07-13 15:54` passed with 15/15 rows, average score 4.79, and no baseline regressions.
 
 ## UI Pass Plan
 
