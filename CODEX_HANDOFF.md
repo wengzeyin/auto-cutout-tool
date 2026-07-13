@@ -43,6 +43,7 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - Current pushed head: `Relax product SVG grid alignment`.
 - Safe next algorithm targets:
   - Improve real matte behavior for light illustration interiors beyond synthetic coverage.
+  - Improve high-contrast black/white edge smoothing; latest validation passes but baseline compare flags `15-high-contrast-edge.png` edge jaggedness (`0.2993 -> 0.4645`).
   - Continue SVG quality work: path simplification, color-region merging, and fewer editable paths without blocky outlines.
   - Tune multi-element splitting with real QA assets once full browser QA screenshots/reports are available.
 - Before changing algorithm thresholds, run the lightweight QA list at the bottom of this file. For larger behavior changes, run browser QA and compare against the previous report.
@@ -154,6 +155,16 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - Added product-vector regression coverage in `qa/test-svg-vector.mjs` for curve output, command density, grid alignment, and fractional coordinates.
 - Full browser QA on `2026-07-13 16:06` passed with 15/15 rows, average score 4.79, and no baseline regressions.
 - Baseline comparison showed product SVG command density stayed unchanged while `svgGridAlignedRatio` improved on all product rows: `05` 0.6560 -> 0.5045, `06` 0.6386 -> 0.4705, `09` 0.5704 -> 0.4239, `14` 0.5973 -> 0.4081.
+
+### Dark Background Fringe Cleanup - Done
+
+- Added connected dark-background fringe cleanup for black-background sticker assets so generated near-black/gray outlines connected to transparent background are removed.
+- The cleanup preserves internal black text/lines by only propagating from transparent-connected dark-background pixels.
+- Fast solid-background cutout now decides aggressive dark-fringe cleanup from foreground color saturation, so colorful black-background sticker sheets are cleaned even when broad image-type routing is imperfect.
+- Low-saturation black-background illustration/high-contrast assets avoid the aggressive sticker cleanup path; dark-background line-art QA also ignores pixels matching the detected dark background when computing lost line art.
+- Added a thicker `black-halo` browser regression case in `qa/test-solid-background-fast-cutout.mjs`; `black`, `black-halo`, and `white` mocks complete locally in under 1s with `darkHaloRatio` 0 and no IMG.LY model-resource requests.
+- Full browser QA on `2026-07-13 16:37` passed with 15/15 rows, average score 4.7717, 0 release blockers, and metric coverage intact.
+- Baseline comparison is not fully green because `15-high-contrast-edge.png` still shows an edge-jaggedness regression (`0.2993 -> 0.4645`) despite validation passing and line-art risk dropping to 0. Keep this as the next matte-quality follow-up rather than hiding it.
 
 ## UI Pass Plan
 

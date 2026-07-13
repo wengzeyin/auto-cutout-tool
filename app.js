@@ -645,6 +645,9 @@ function getExportScale() {
 function getRefineSettings() {
   const imageType = state.currentItem?.imageType || state.imageType || "unknown";
   const preset = getAlgorithmPreset(imageType);
+  const sourceBackground = state.currentItem?.fastCutoutBackground
+    ? { kind: state.currentItem.fastCutoutBackground, color: [0, 0, 0] }
+    : estimateSourceBackgroundKind(state.sourceOriginalCanvas);
   const base = {
     edgeSmooth: Number(els.edgeSmooth.value),
     feather: Number(els.feather.value),
@@ -653,8 +656,27 @@ function getRefineSettings() {
     edgeOffset: Number(els.edgeOffset.value),
     fidelity: els.alphaBoost.value === "soft" ? "preserve" : els.alphaBoost.value === "clean" ? "clean" : "balanced",
     preset,
+    sourceBackgroundKind: sourceBackground?.kind || "unknown",
+    sourceBackgroundColor: sourceBackground?.color || [0, 0, 0],
   };
   return buildMatteProfile(base, imageType);
+}
+
+function estimateSourceBackgroundKind(sourceCanvas) {
+  if (!sourceCanvas?.width || !sourceCanvas?.height) return null;
+  try {
+    const ctx = sourceCanvas.getContext("2d", { willReadFrequently: true });
+    const imageData = ctx.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
+    const background = estimateSolidEdgeBackground(imageData);
+    if (!background || background.coverage < 0.42 || background.variance > 48) return null;
+    if (background.metrics.lightness < 58 && background.metrics.saturation < 0.24) {
+      return { kind: "dark", color: background.color };
+    }
+    if (background.metrics.lightness > 214 && background.metrics.saturation < 0.24) {
+      return { kind: "light", color: background.color };
+    }
+  } catch {}
+  return null;
 }
 
 function getAlgorithmPreset(imageType = "unknown") {
@@ -735,6 +757,8 @@ function buildMatteProfile(base, imageType = "unknown") {
     preserveLightRegions: false,
     preserveLineArt: false,
     preserveColoredDetails: false,
+    darkBackgroundCleanup: base.sourceBackgroundKind === "dark",
+    darkBackgroundColor: base.sourceBackgroundColor || [0, 0, 0],
     despeckleStrength: 1,
     alphaNormalizedThreshold: 120,
     coreNormalizeThreshold: 0,
@@ -1415,6 +1439,11 @@ async function tryFastSolidBackgroundCutout(item) {
   if (imageType === "transparentMaterial" && !result.foreground?.simpleLightSubject) return null;
   if (imageType === "photo" && result.backgroundKind !== "dark" && !result.foreground?.simpleLightSubject) return null;
   if (
+    result.backgroundKind === "dark" &&
+    imageType === "illustration" &&
+    (result.foreground?.saturatedRatio || 0) <= 0.12
+  ) return null;
+  if (
     result.backgroundKind !== "dark" &&
     (imageType === "sticker" || imageType === "illustration") &&
     !result.foreground?.simpleLightSubject
@@ -1453,9 +1482,13 @@ function createSolidBackgroundCutoutCanvas(sourceCanvas, options = {}) {
   const backgroundCount = mask.reduce((sum, value) => sum + value, 0);
   const backgroundRatio = backgroundCount / Math.max(1, width * height);
   if (backgroundRatio < 0.08 || backgroundRatio > 0.96) return null;
+  const foreground = measureSolidBackgroundForeground(imageData, mask);
 
   const output = new ImageData(new Uint8ClampedArray(imageData.data), width, height);
-  applySolidBackgroundAlpha(output, mask, background.color, tolerance, isDark ? "dark" : isLight ? "light" : "solid");
+  applySolidBackgroundAlpha(output, mask, background.color, tolerance, isDark ? "dark" : isLight ? "light" : "solid", {
+    imageType,
+    darkFringeAggressive: shouldUseAggressiveDarkFringeCleanup(imageType, foreground),
+  });
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
@@ -1464,8 +1497,14 @@ function createSolidBackgroundCutoutCanvas(sourceCanvas, options = {}) {
     canvas,
     backgroundKind: isDark ? "dark" : isLight ? "light" : "solid",
     backgroundRatio,
-    foreground: measureSolidBackgroundForeground(imageData, mask),
+    foreground,
   };
+}
+
+function shouldUseAggressiveDarkFringeCleanup(imageType, foreground) {
+  return imageType === "sticker"
+    || imageType === "line-art"
+    || foreground?.saturatedRatio > 0.12;
 }
 
 function measureSolidBackgroundForeground(imageData, backgroundMask) {
@@ -1626,7 +1665,7 @@ function floodBackgroundMask(imageData, backgroundColor, tolerance) {
   return mask;
 }
 
-function applySolidBackgroundAlpha(imageData, backgroundMask, backgroundColor, tolerance, backgroundKind = "solid") {
+function applySolidBackgroundAlpha(imageData, backgroundMask, backgroundColor, tolerance, backgroundKind = "solid", options = {}) {
   const { width, height, data } = imageData;
   const softTolerance = tolerance * 1.55;
   for (let index = 0; index < backgroundMask.length; index += 1) {
@@ -1641,10 +1680,11 @@ function applySolidBackgroundAlpha(imageData, backgroundMask, backgroundColor, t
     const alpha = clamp((distance - tolerance * 0.48) / Math.max(1, softTolerance - tolerance * 0.48), 0, 1);
     data[offset + 3] = Math.round(Math.min(data[offset + 3], alpha * 255));
   }
-  if (backgroundKind === "dark") removeDarkBackgroundHalo(imageData, backgroundColor);
+  if (backgroundKind === "dark") removeDarkBackgroundHalo(imageData, backgroundColor, options);
 }
 
-function removeDarkBackgroundHalo(imageData, backgroundColor) {
+function removeDarkBackgroundHalo(imageData, backgroundColor, options = {}) {
+  if (!options.darkFringeAggressive && options.imageType === "illustration") return;
   const { width, height, data } = imageData;
   const nextAlpha = new Uint8ClampedArray(width * height);
   for (let index = 0; index < nextAlpha.length; index += 1) nextAlpha[index] = data[index * 4 + 3];
@@ -1668,6 +1708,13 @@ function removeDarkBackgroundHalo(imageData, backgroundColor) {
 
   for (let index = 0; index < nextAlpha.length; index += 1) {
     data[index * 4 + 3] = nextAlpha[index];
+  }
+  if (options.darkFringeAggressive) {
+    suppressDarkBackgroundFringeAlpha(imageData, {
+      darkBackgroundCleanup: true,
+      darkBackgroundColor: backgroundColor,
+      darkFringeAggressive: true,
+    });
   }
 }
 
@@ -2000,6 +2047,7 @@ function refineCutoutAlpha(sourceCanvas, settings) {
   suppressWhiteFringeAlpha(imageData, settings);
   antiAliasHardEdges(imageData, settings);
   suppressWhiteFringeAlpha(imageData, settings);
+  suppressDarkBackgroundFringeAlpha(imageData, settings);
   ctx.putImageData(imageData, 0, 0);
   return { canvas, alphaNormalized };
 }
@@ -2093,6 +2141,71 @@ function suppressWhiteFringeAlpha(imageData, settings = {}) {
     }
   }
   return imageData;
+}
+
+function suppressDarkBackgroundFringeAlpha(imageData, settings = {}) {
+  if (!settings.darkBackgroundCleanup) return imageData;
+  const { width, height, data } = imageData;
+  const source = new Uint8ClampedArray(data);
+  const backgroundColor = Array.isArray(settings.darkBackgroundColor) ? settings.darkBackgroundColor : [0, 0, 0];
+  const aggressive = Boolean(settings.darkFringeAggressive);
+  const distanceLimit = aggressive ? 150 : 132;
+  const lightnessLimit = aggressive ? 126 : 112;
+  const candidate = new Uint8Array(width * height);
+  const removeMask = new Uint8Array(width * height);
+
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const offset = (y * width + x) * 4;
+      const alpha = source[offset + 3];
+      if (alpha <= 0) continue;
+      const metrics = colorMetrics(source[offset], source[offset + 1], source[offset + 2]);
+      const distance = Math.sqrt(colorDistanceToRgbSq(source, offset, backgroundColor));
+      if (metrics.lightness > lightnessLimit && distance > distanceLimit) continue;
+      const nearBackground = distance <= distanceLimit || (metrics.lightness < lightnessLimit && metrics.saturation < 0.28);
+      if (!nearBackground) continue;
+      const index = y * width + x;
+      candidate[index] = 1;
+      if (hasTransparentNeighbor(source, width, height, x, y, aggressive ? 2 : 1, 12)) removeMask[index] = 1;
+    }
+  }
+
+  for (let pass = 0; pass < (aggressive ? 12 : 5); pass += 1) {
+    let changed = 0;
+    const current = new Uint8Array(removeMask);
+    for (let y = 1; y < height - 1; y += 1) {
+      for (let x = 1; x < width - 1; x += 1) {
+        const index = y * width + x;
+        if (!candidate[index] || current[index]) continue;
+        if (hasMaskNeighbor(current, width, height, x, y, 1)) {
+          removeMask[index] = 1;
+          changed += 1;
+        }
+      }
+    }
+    if (!changed) break;
+  }
+
+  for (let index = 0; index < removeMask.length; index += 1) {
+    if (!removeMask[index]) continue;
+    const offset = index * 4;
+    const distance = Math.sqrt(colorDistanceToRgbSq(source, offset, backgroundColor));
+    data[offset + 3] = distance < 74 || aggressive ? 0 : Math.min(source[offset + 3], 24);
+  }
+  return imageData;
+}
+
+function hasMaskNeighbor(mask, width, height, x, y, radius) {
+  for (let oy = -radius; oy <= radius; oy += 1) {
+    const py = y + oy;
+    if (py < 0 || py >= height) continue;
+    for (let ox = -radius; ox <= radius; ox += 1) {
+      const px = x + ox;
+      if (px < 0 || px >= width || (px === x && py === y)) continue;
+      if (mask[py * width + px]) return true;
+    }
+  }
+  return false;
 }
 
 function antiAliasHardEdges(imageData, settings = {}) {
@@ -2590,7 +2703,9 @@ function computeMatteMetrics(cutoutData, originalData, settings = {}) {
         && isOriginalEnclosedLightDetail(original, width, height, x, y, 7);
       const lightCandidate = (metrics.lightness > 168 && metrics.lightness < 246 && metrics.saturation > 0.055)
         || protectedInteriorLightCandidate;
-      if (lineCandidate) {
+      const sourceDarkBackgroundPixel = isSourceDarkBackgroundPixel(original, offset, metrics, settings)
+        && (alpha < 80 || hasTransparentNeighbor(data, width, height, x, y, 2, supportThreshold));
+      if (lineCandidate && !sourceDarkBackgroundPixel) {
         possibleLine += 1;
         if (alpha < 80) lostLine += 1;
       }
@@ -2628,6 +2743,13 @@ function computeMatteMetrics(cutoutData, originalData, settings = {}) {
     lowAlphaWhiteFringeRatio: lowAlphaFringe / Math.max(1, fringe),
     whiteFringeAverageAlpha: fringeAlphaSum / Math.max(1, fringe),
   };
+}
+
+function isSourceDarkBackgroundPixel(originalData, offset, metrics, settings = {}) {
+  if (!settings.darkBackgroundCleanup) return false;
+  const backgroundColor = Array.isArray(settings.darkBackgroundColor) ? settings.darkBackgroundColor : [0, 0, 0];
+  const distance = Math.sqrt(colorDistanceToRgbSq(originalData, offset, backgroundColor));
+  return distance <= 132 || (metrics.lightness < 112 && metrics.saturation < 0.28);
 }
 
 function hasOpaqueNeighbor(data, width, height, x, y, radius, threshold) {

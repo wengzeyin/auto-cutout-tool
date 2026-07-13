@@ -32,10 +32,11 @@ try {
   page.on("pageerror", (error) => consoleMessages.push(`pageerror: ${error.message}`));
 
   const black = await runSolidBackgroundCase(page, "black");
+  const blackHalo = await runSolidBackgroundCase(page, "black-halo");
   const white = await runSolidBackgroundCase(page, "white");
   const failures = [];
 
-  for (const result of [black, white]) {
+  for (const result of [black, blackHalo, white]) {
     if (result.durationMs > 7000) failures.push(`${result.kind}: expected fast local cutout under 7000ms, got ${result.durationMs}ms.`);
     if (result.metrics.corners.some((alpha) => alpha > 8)) failures.push(`${result.kind}: corners are not transparent (${result.metrics.corners.join(",")}).`);
     if (result.metrics.progress !== "完成") failures.push(`${result.kind}: progress label is ${result.metrics.progress || "missing"}, expected 完成.`);
@@ -43,11 +44,14 @@ try {
   }
   if (black.metrics.darkHaloRatio > 0.006) failures.push(`black: dark halo ratio ${format(black.metrics.darkHaloRatio)} is too high.`);
   if (black.metrics.darkHalo > 0) failures.push(`black: expected no near-black pixels touching transparent background, got ${black.metrics.darkHalo}.`);
+  if (blackHalo.metrics.darkHaloRatio > 0.006) failures.push(`black-halo: dark halo ratio ${format(blackHalo.metrics.darkHaloRatio)} is too high.`);
+  if (blackHalo.metrics.darkHalo > 0) failures.push(`black-halo: expected no generated near-black outline, got ${blackHalo.metrics.darkHalo}.`);
   if (white.metrics.visible < 1000) failures.push(`white: visible foreground area ${white.metrics.visible} is too small.`);
 
   const result = {
     pass: failures.length === 0,
     black,
+    blackHalo,
     white,
     failures,
     consoleMessages: consoleMessages.slice(-40),
@@ -97,12 +101,12 @@ async function injectSolidBackgroundFile(page, kind) {
     canvas.height = 620;
     const ctx = canvas.getContext("2d");
 
-    if (imageKind === "black") {
+    if (imageKind === "black" || imageKind === "black-halo") {
       ctx.fillStyle = "#000";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      drawSticker(ctx, 240, 180, "#3f60b8");
-      drawSticker(ctx, 610, 250, "#ffca12");
-      drawSticker(ctx, 430, 450, "#ef4e52");
+      drawSticker(ctx, 240, 180, "#3f60b8", imageKind === "black-halo");
+      drawSticker(ctx, 610, 250, "#ffca12", imageKind === "black-halo");
+      drawSticker(ctx, 430, 450, "#ef4e52", imageKind === "black-halo");
     } else {
       ctx.fillStyle = "#fff";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -127,9 +131,15 @@ async function injectSolidBackgroundFile(page, kind) {
     input.files = data.files;
     input.dispatchEvent(new Event("change", { bubbles: true }));
 
-    function drawSticker(context, x, y, color) {
+    function drawSticker(context, x, y, color, halo = false) {
       context.save();
       context.translate(x, y);
+      if (halo) {
+        context.fillStyle = "#5c5c5c";
+        context.beginPath();
+        context.roundRect(-114, -67, 228, 134, 31);
+        context.fill();
+      }
       context.fillStyle = "#fff";
       context.beginPath();
       context.roundRect(-105, -58, 210, 116, 26);
@@ -171,8 +181,12 @@ async function readResultMetrics(page) {
           continue;
         }
         visible += 1;
-        const lightness = data[offset] * 0.299 + data[offset + 1] * 0.587 + data[offset + 2] * 0.114;
-        if (lightness >= 36) continue;
+        const red = data[offset];
+        const green = data[offset + 1];
+        const blue = data[offset + 2];
+        const lightness = red * 0.299 + green * 0.587 + blue * 0.114;
+        const saturation = Math.max(red, green, blue) ? (Math.max(red, green, blue) - Math.min(red, green, blue)) / Math.max(red, green, blue) : 0;
+        if (lightness >= 116 || saturation > 0.24) continue;
         let touchesTransparent = false;
         for (let oy = -1; oy <= 1; oy += 1) {
           for (let ox = -1; ox <= 1; ox += 1) {

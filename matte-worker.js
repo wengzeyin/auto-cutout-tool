@@ -52,6 +52,7 @@ function refineImageData(imageData, settings) {
   suppressWhiteFringeAlpha(imageData, settings);
   antiAliasHardEdges(imageData, settings);
   suppressWhiteFringeAlpha(imageData, settings);
+  suppressDarkBackgroundFringeAlpha(imageData, settings);
 
   return { imageData, alphaNormalized };
 }
@@ -145,6 +146,71 @@ function suppressWhiteFringeAlpha(imageData, settings = {}) {
     }
   }
   return imageData;
+}
+
+function suppressDarkBackgroundFringeAlpha(imageData, settings = {}) {
+  if (!settings.darkBackgroundCleanup) return imageData;
+  const { width, height, data } = imageData;
+  const source = new Uint8ClampedArray(data);
+  const backgroundColor = Array.isArray(settings.darkBackgroundColor) ? settings.darkBackgroundColor : [0, 0, 0];
+  const aggressive = Boolean(settings.darkFringeAggressive);
+  const distanceLimit = aggressive ? 150 : 132;
+  const lightnessLimit = aggressive ? 126 : 112;
+  const candidate = new Uint8Array(width * height);
+  const removeMask = new Uint8Array(width * height);
+
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const offset = (y * width + x) * 4;
+      const alpha = source[offset + 3];
+      if (alpha <= 0) continue;
+      const metrics = colorMetrics(source[offset], source[offset + 1], source[offset + 2]);
+      const distance = Math.sqrt(colorDistanceToRgbSq(source, offset, backgroundColor));
+      if (metrics.lightness > lightnessLimit && distance > distanceLimit) continue;
+      const nearBackground = distance <= distanceLimit || (metrics.lightness < lightnessLimit && metrics.saturation < 0.28);
+      if (!nearBackground) continue;
+      const index = y * width + x;
+      candidate[index] = 1;
+      if (hasTransparentNeighbor(source, width, height, x, y, aggressive ? 2 : 1, 12)) removeMask[index] = 1;
+    }
+  }
+
+  for (let pass = 0; pass < (aggressive ? 12 : 5); pass += 1) {
+    let changed = 0;
+    const current = new Uint8Array(removeMask);
+    for (let y = 1; y < height - 1; y += 1) {
+      for (let x = 1; x < width - 1; x += 1) {
+        const index = y * width + x;
+        if (!candidate[index] || current[index]) continue;
+        if (hasMaskNeighbor(current, width, height, x, y, 1)) {
+          removeMask[index] = 1;
+          changed += 1;
+        }
+      }
+    }
+    if (!changed) break;
+  }
+
+  for (let index = 0; index < removeMask.length; index += 1) {
+    if (!removeMask[index]) continue;
+    const offset = index * 4;
+    const distance = Math.sqrt(colorDistanceToRgbSq(source, offset, backgroundColor));
+    data[offset + 3] = distance < 74 || aggressive ? 0 : Math.min(source[offset + 3], 24);
+  }
+  return imageData;
+}
+
+function hasMaskNeighbor(mask, width, height, x, y, radius) {
+  for (let oy = -radius; oy <= radius; oy += 1) {
+    const py = y + oy;
+    if (py < 0 || py >= height) continue;
+    for (let ox = -radius; ox <= radius; ox += 1) {
+      const px = x + ox;
+      if (px < 0 || px >= width || (px === x && py === y)) continue;
+      if (mask[py * width + px]) return true;
+    }
+  }
+  return false;
 }
 
 function hasColoredOpaqueNeighbor(data, width, height, x, y, radius, threshold) {
@@ -470,6 +536,13 @@ function colorMetrics(red, green, blue) {
     lightness: red * 0.299 + green * 0.587 + blue * 0.114,
     saturation: max ? (max - min) / max : 0,
   };
+}
+
+function colorDistanceToRgbSq(data, offset, color) {
+  const dr = data[offset] - color[0];
+  const dg = data[offset + 1] - color[1];
+  const db = data[offset + 2] - color[2];
+  return (dr * dr + dg * dg + db * db) / 3;
 }
 
 function clamp(value, min, max) {

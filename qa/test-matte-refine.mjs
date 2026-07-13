@@ -296,6 +296,7 @@ function refineAlpha(image, settings) {
   suppressWhiteFringeAlpha(image, settings);
   antiAliasHardEdges(image, settings);
   suppressWhiteFringeAlpha(image, settings);
+  suppressDarkBackgroundFringeAlpha(image, settings);
   return image;
 }
 
@@ -389,6 +390,74 @@ function suppressWhiteFringeAlpha(image, settings = {}) {
     }
   }
   return image;
+}
+
+function suppressDarkBackgroundFringeAlpha(image, settings = {}) {
+  if (!settings.darkBackgroundCleanup) return image;
+  const source = new Uint8ClampedArray(image.data);
+  const backgroundColor = Array.isArray(settings.darkBackgroundColor) ? settings.darkBackgroundColor : [0, 0, 0];
+  const aggressive = Boolean(settings.darkFringeAggressive);
+  const distanceLimit = aggressive ? 150 : 132;
+  const lightnessLimit = aggressive ? 126 : 112;
+  const candidate = new Uint8Array(width * height);
+  const removeMask = new Uint8Array(width * height);
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const offset = (y * width + x) * 4;
+      const alpha = source[offset + 3];
+      if (alpha <= 0) continue;
+      const metrics = colorMetrics(source[offset], source[offset + 1], source[offset + 2]);
+      const distance = Math.sqrt(colorDistanceToRgbSq(source, offset, backgroundColor));
+      if (metrics.lightness > lightnessLimit && distance > distanceLimit) continue;
+      const nearBackground = distance <= distanceLimit || (metrics.lightness < lightnessLimit && metrics.saturation < 0.28);
+      if (!nearBackground) continue;
+      const index = y * width + x;
+      candidate[index] = 1;
+      if (hasTransparentNeighbor(source, x, y, aggressive ? 2 : 1, 12)) removeMask[index] = 1;
+    }
+  }
+  for (let pass = 0; pass < (aggressive ? 12 : 5); pass += 1) {
+    let changed = 0;
+    const current = new Uint8Array(removeMask);
+    for (let y = 1; y < height - 1; y += 1) {
+      for (let x = 1; x < width - 1; x += 1) {
+        const index = y * width + x;
+        if (!candidate[index] || current[index]) continue;
+        if (hasMaskNeighbor(current, x, y, 1)) {
+          removeMask[index] = 1;
+          changed += 1;
+        }
+      }
+    }
+    if (!changed) break;
+  }
+  for (let index = 0; index < removeMask.length; index += 1) {
+    if (!removeMask[index]) continue;
+    const offset = index * 4;
+    const distance = Math.sqrt(colorDistanceToRgbSq(source, offset, backgroundColor));
+    image.data[offset + 3] = distance < 74 || aggressive ? 0 : Math.min(source[offset + 3], 24);
+  }
+  return image;
+}
+
+function hasMaskNeighbor(mask, x, y, radius) {
+  for (let oy = -radius; oy <= radius; oy += 1) {
+    const py = y + oy;
+    if (py < 0 || py >= height) continue;
+    for (let ox = -radius; ox <= radius; ox += 1) {
+      const px = x + ox;
+      if (px < 0 || px >= width || (px === x && py === y)) continue;
+      if (mask[py * width + px]) return true;
+    }
+  }
+  return false;
+}
+
+function colorDistanceToRgbSq(data, offset, color) {
+  const dr = data[offset] - color[0];
+  const dg = data[offset + 1] - color[1];
+  const db = data[offset + 2] - color[2];
+  return (dr * dr + dg * dg + db * db) / 3;
 }
 
 function hasColoredOpaqueNeighbor(data, x, y, radius, threshold) {
@@ -870,6 +939,38 @@ for (let y = 44; y <= 54; y += 1) {
 const lowAlphaStickerAfter = makeImageData([255, 255, 255, 0]);
 lowAlphaStickerAfter.data.set(lowAlphaStickerBefore.data);
 suppressWhiteFringeAlpha(lowAlphaStickerAfter, { imageType: "sticker", fidelity: "balanced" });
+const darkHaloBefore = makeImageData([255, 255, 255, 0]);
+const darkExteriorHalo = [];
+const darkInteriorLine = [];
+fillRect(darkHaloBefore, 42, 34, 104, 86, [255, 255, 255, 255]);
+for (let y = 32; y <= 88; y += 1) {
+  for (let x = 38; x <= 41; x += 1) {
+    setPixel(darkHaloBefore, x, y, [8, 8, 8, 235]);
+    darkExteriorHalo.push(y * width + x);
+  }
+  for (let x = 105; x <= 108; x += 1) {
+    setPixel(darkHaloBefore, x, y, [8, 8, 8, 235]);
+    darkExteriorHalo.push(y * width + x);
+  }
+}
+for (let x = 38; x <= 108; x += 1) {
+  for (let y = 30; y <= 33; y += 1) {
+    setPixel(darkHaloBefore, x, y, [8, 8, 8, 235]);
+    darkExteriorHalo.push(y * width + x);
+  }
+  for (let y = 87; y <= 90; y += 1) {
+    setPixel(darkHaloBefore, x, y, [8, 8, 8, 235]);
+    darkExteriorHalo.push(y * width + x);
+  }
+}
+fillRect(darkHaloBefore, 56, 56, 88, 60, [8, 8, 8, 255], darkInteriorLine);
+const darkHaloAfter = makeImageData([255, 255, 255, 0]);
+darkHaloAfter.data.set(darkHaloBefore.data);
+suppressDarkBackgroundFringeAlpha(darkHaloAfter, {
+  darkBackgroundCleanup: true,
+  darkBackgroundColor: [0, 0, 0],
+  darkFringeAggressive: true,
+});
 const semiCoreBefore = makeImageData([255, 255, 255, 0]);
 fillRect(semiCoreBefore, 22, 22, 42, 42, [80, 120, 160, 255]);
 fillRect(semiCoreBefore, 28, 28, 36, 36, [80, 120, 160, 118]);
@@ -922,6 +1023,9 @@ const metrics = {
   lowAlphaStickerFringeAfter: averageAlphaInRect(lowAlphaStickerAfter, 35, 26, 35, 82),
   lowAlphaStickerInteriorBefore: averageAlphaInRect(lowAlphaStickerBefore, 57, 44, 57, 54),
   lowAlphaStickerInteriorAfter: averageAlphaInRect(lowAlphaStickerAfter, 57, 44, 57, 54),
+  darkHaloBefore: averageAlpha(darkHaloBefore, darkExteriorHalo),
+  darkHaloAfter: averageAlpha(darkHaloAfter, darkExteriorHalo),
+  darkInteriorLineAfter: averageAlpha(darkHaloAfter, darkInteriorLine),
   semiCoreBefore: averageAlphaInRect(semiCoreBefore, 28, 28, 36, 36),
   semiCoreAfter: averageAlphaInRect(semiCoreAfter, 28, 28, 36, 36),
   semiEdgeAfter: averageAlphaInRect(semiCoreAfter, 72, 24, 88, 36),
@@ -987,6 +1091,8 @@ if (metrics.guidedNoiseAfter > 45) failures.push(`guided smoothing leaked into d
 if (metrics.stickerFringeAfter >= metrics.stickerFringeBefore * 0.45) failures.push(`sticker white fringe not reduced enough: ${metrics.stickerFringeBefore.toFixed(1)} -> ${metrics.stickerFringeAfter.toFixed(1)}`);
 if (metrics.lowAlphaStickerFringeAfter > 1) failures.push(`low alpha sticker fringe not cleared: ${metrics.lowAlphaStickerFringeBefore.toFixed(1)} -> ${metrics.lowAlphaStickerFringeAfter.toFixed(1)}`);
 if (metrics.lowAlphaStickerInteriorAfter < metrics.lowAlphaStickerInteriorBefore * 0.7) failures.push(`interior white sticker detail over-cleared: ${metrics.lowAlphaStickerInteriorBefore.toFixed(1)} -> ${metrics.lowAlphaStickerInteriorAfter.toFixed(1)}`);
+if (metrics.darkHaloAfter > 4) failures.push(`dark background halo not cleared: ${metrics.darkHaloBefore.toFixed(1)} -> ${metrics.darkHaloAfter.toFixed(1)}`);
+if (metrics.darkInteriorLineAfter < 240) failures.push(`interior dark line was over-cleared: ${metrics.darkInteriorLineAfter.toFixed(1)}`);
 if (metrics.semiCoreAfter < 250) failures.push(`semi-transparent core not normalized: ${metrics.semiCoreBefore.toFixed(1)} -> ${metrics.semiCoreAfter.toFixed(1)}`);
 if (metrics.semiEdgeAfter > 145) failures.push(`isolated semi-transparent edge was over-normalized: ${metrics.semiEdgeAfter.toFixed(1)}`);
 if (metrics.glassCoreAfter > 238) failures.push(`transparent material core over-normalized: ${metrics.glassCoreBefore.toFixed(1)} -> ${metrics.glassCoreAfter.toFixed(1)}`);
