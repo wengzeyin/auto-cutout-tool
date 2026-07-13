@@ -1316,25 +1316,36 @@ async function processImage(options = {}) {
   await nextFrame();
 
   try {
-    const blob = await removeBackground(state.file, {
-      ...getBackgroundRemovalResourceConfig(),
-      model: els.modelSelect.value,
-      device: "cpu",
-      output: { format: "image/png", type: "foreground" },
-      progress: (key, current, total) => {
-        if (total) {
-          const percent = Math.round((current / total) * 100);
-          setBusy(true, `正在下载/加载 ${key}：${percent}%`);
-          setProgress(percent, `${percent}%`);
-        }
-      },
-    });
+    let blob = await tryFastSolidBackgroundCutout(item);
+    if (!blob) {
+      blob = await removeBackground(state.file, {
+        ...getBackgroundRemovalResourceConfig(),
+        model: els.modelSelect.value,
+        device: "cpu",
+        output: { format: "image/png", type: "foreground" },
+        progress: (key, current, total) => {
+          if (total) {
+            const percent = Math.round((current / total) * 100);
+            setBusy(true, `正在下载/加载 ${key}：${percent}%`);
+            setProgress(percent, `${percent}%`);
+          }
+        },
+      });
+    }
     if (token !== state.processingToken || item !== state.currentItem) return;
 
     state.originalCutoutBlob = blob;
     const bitmap = await createImageBitmap(blob);
     drawBitmapToCanvas(bitmap, state.cutoutOriginalCanvas, state.cutoutOriginalCanvas.getContext("2d"), Infinity);
-    await refineAndPreviewCutout({ immediateScan: false });
+    if (item?.fastCutout) {
+      drawBitmapToCanvas(bitmap, state.refinedCutoutCanvas, state.refinedCutoutCanvas.getContext("2d"), Infinity);
+      drawCanvasToPreview(state.refinedCutoutCanvas, els.resultCanvas, resultCtx);
+      state.cutoutBlob = blob;
+      state.matteWarnings = [];
+      state.alphaNormalized = false;
+    } else {
+      await refineAndPreviewCutout({ immediateScan: false });
+    }
     if (item) {
       item.resultWidth = state.refinedCutoutCanvas.width;
       item.resultHeight = state.refinedCutoutCanvas.height;
@@ -1345,6 +1356,7 @@ async function processImage(options = {}) {
     els.downloadCutoutBtn.disabled = false;
     els.manualModeBtn.disabled = false;
     await scanAndRender();
+    setProgress(100, "完成");
     if (item) {
       item.status = "done";
       item.originalCutoutBlob = state.originalCutoutBlob;
@@ -1369,7 +1381,8 @@ async function processImage(options = {}) {
     if (token === state.processingToken) {
       state.processing = false;
       setBusy(false);
-      hideProgress();
+      if (state.cutoutBlob) setProgress(100, "完成");
+      else hideProgress();
       updateUiState();
     }
   }
@@ -1381,6 +1394,253 @@ function getBackgroundRemovalResourceConfig() {
   return {
     publicPath: new URL("./__imgly/", window.location.href).toString(),
   };
+}
+
+async function tryFastSolidBackgroundCutout(item) {
+  if (!item || item.isQa || item.qaNeedsRealPhoto || !state.sourceOriginalCanvas.width) return null;
+  const imageType = normalizeImageType(item.imageType || state.imageType || "unknown");
+  const result = createSolidBackgroundCutoutCanvas(state.sourceOriginalCanvas, { imageType });
+  if (!result) return null;
+  if (imageType === "transparentMaterial") return null;
+  if (imageType === "photo" && result.backgroundKind !== "dark") return null;
+  if (
+    result.backgroundKind !== "dark" &&
+    (imageType === "sticker" || imageType === "illustration")
+  ) return null;
+
+  setBusy(true, result.backgroundKind === "dark"
+    ? "检测到黑色纯底，正在本地快速抠图..."
+    : "检测到浅色纯底，正在本地快速抠图...");
+  setProgress(72, "本地快速抠图");
+  item.fastCutout = true;
+  item.fastCutoutBackground = result.backgroundKind;
+  return canvasToBlob(result.canvas);
+}
+
+function createSolidBackgroundCutoutCanvas(sourceCanvas, options = {}) {
+  const { width, height } = sourceCanvas;
+  if (width < 24 || height < 24) return null;
+  const ctx = sourceCanvas.getContext("2d", { willReadFrequently: true });
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const background = estimateSolidEdgeBackground(imageData);
+  if (!background) return null;
+
+  const imageType = normalizeImageType(options.imageType || "unknown");
+  const isDark = background.metrics.lightness < 58 && background.metrics.saturation < 0.24;
+  const isLight = background.metrics.lightness > 214 && background.metrics.saturation < 0.24;
+  const isPlain = background.coverage > 0.62 && background.variance < 28;
+  if (!isPlain && !((isDark || isLight) && background.coverage > 0.48 && background.variance < 42)) return null;
+  if (imageType === "unknown" && !isDark && !isLight && background.coverage < 0.72) return null;
+
+  const tolerance = isDark
+    ? 82
+    : isLight
+      ? 52
+      : 42;
+  const mask = floodBackgroundMask(imageData, background.color, tolerance);
+  const backgroundCount = mask.reduce((sum, value) => sum + value, 0);
+  const backgroundRatio = backgroundCount / Math.max(1, width * height);
+  if (backgroundRatio < 0.08 || backgroundRatio > 0.96) return null;
+
+  const output = new ImageData(new Uint8ClampedArray(imageData.data), width, height);
+  applySolidBackgroundAlpha(output, mask, background.color, tolerance, isDark ? "dark" : isLight ? "light" : "solid");
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext("2d").putImageData(output, 0, 0);
+  return {
+    canvas,
+    backgroundKind: isDark ? "dark" : isLight ? "light" : "solid",
+    backgroundRatio,
+  };
+}
+
+function estimateSolidEdgeBackground(imageData) {
+  const { width, height, data } = imageData;
+  const step = Math.max(1, Math.floor(Math.min(width, height) / 180));
+  const samples = [];
+  const add = (x, y) => {
+    const offset = (y * width + x) * 4;
+    if (data[offset + 3] < 240) return;
+    samples.push([data[offset], data[offset + 1], data[offset + 2]]);
+  };
+  for (let x = 0; x < width; x += step) {
+    add(x, 0);
+    add(x, height - 1);
+  }
+  for (let y = 0; y < height; y += step) {
+    add(0, y);
+    add(width - 1, y);
+  }
+  if (samples.length < 24) return null;
+
+  const buckets = new Map();
+  for (const sample of samples) {
+    const key = `${sample[0] >> 4},${sample[1] >> 4},${sample[2] >> 4}`;
+    const bucket = buckets.get(key) || { count: 0, r: 0, g: 0, b: 0, samples: [] };
+    bucket.count += 1;
+    bucket.r += sample[0];
+    bucket.g += sample[1];
+    bucket.b += sample[2];
+    bucket.samples.push(sample);
+    buckets.set(key, bucket);
+  }
+
+  const dominant = [...buckets.values()].sort((a, b) => b.count - a.count)[0];
+  if (!dominant || dominant.count < samples.length * 0.36) return null;
+  const color = [
+    Math.round(dominant.r / dominant.count),
+    Math.round(dominant.g / dominant.count),
+    Math.round(dominant.b / dominant.count),
+  ];
+  const variance = Math.sqrt(
+    dominant.samples.reduce((sum, sample) => {
+      const dr = sample[0] - color[0];
+      const dg = sample[1] - color[1];
+      const db = sample[2] - color[2];
+      return sum + (dr * dr + dg * dg + db * db) / 3;
+    }, 0) / Math.max(1, dominant.samples.length),
+  );
+  return {
+    color,
+    coverage: dominant.count / samples.length,
+    variance,
+    metrics: colorMetrics(color[0], color[1], color[2]),
+  };
+}
+
+function floodBackgroundMask(imageData, backgroundColor, tolerance) {
+  const { width, height, data } = imageData;
+  const mask = new Uint8Array(width * height);
+  const queue = [];
+  const toleranceSq = tolerance * tolerance;
+  const enqueue = (x, y) => {
+    if (x < 0 || x >= width || y < 0 || y >= height) return;
+    const index = y * width + x;
+    if (mask[index]) return;
+    const offset = index * 4;
+    if (data[offset + 3] < 8 || colorDistanceToRgbSq(data, offset, backgroundColor) <= toleranceSq) {
+      mask[index] = 1;
+      queue.push(index);
+    }
+  };
+  for (let x = 0; x < width; x += 1) {
+    enqueue(x, 0);
+    enqueue(x, height - 1);
+  }
+  for (let y = 0; y < height; y += 1) {
+    enqueue(0, y);
+    enqueue(width - 1, y);
+  }
+
+  while (queue.length) {
+    const index = queue.pop();
+    const x = index % width;
+    const y = Math.floor(index / width);
+    enqueue(x - 1, y);
+    enqueue(x + 1, y);
+    enqueue(x, y - 1);
+    enqueue(x, y + 1);
+  }
+  return mask;
+}
+
+function applySolidBackgroundAlpha(imageData, backgroundMask, backgroundColor, tolerance, backgroundKind = "solid") {
+  const { width, height, data } = imageData;
+  const softTolerance = tolerance * 1.55;
+  for (let index = 0; index < backgroundMask.length; index += 1) {
+    const offset = index * 4;
+    if (backgroundMask[index]) {
+      data[offset + 3] = 0;
+      continue;
+    }
+    if (!hasBackgroundNeighbor(backgroundMask, width, height, index)) continue;
+    const distance = Math.sqrt(colorDistanceToRgbSq(data, offset, backgroundColor));
+    if (distance >= softTolerance) continue;
+    const alpha = clamp((distance - tolerance * 0.48) / Math.max(1, softTolerance - tolerance * 0.48), 0, 1);
+    data[offset + 3] = Math.round(Math.min(data[offset + 3], alpha * 255));
+  }
+  if (backgroundKind === "dark") removeDarkBackgroundHalo(imageData, backgroundColor);
+}
+
+function removeDarkBackgroundHalo(imageData, backgroundColor) {
+  const { width, height, data } = imageData;
+  const nextAlpha = new Uint8ClampedArray(width * height);
+  for (let index = 0; index < nextAlpha.length; index += 1) nextAlpha[index] = data[index * 4 + 3];
+
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const index = y * width + x;
+      const offset = index * 4;
+      const alpha = data[offset + 3];
+      if (alpha <= 8) continue;
+      const lightness = data[offset] * 0.299 + data[offset + 1] * 0.587 + data[offset + 2] * 0.114;
+      if (lightness > 72) continue;
+      if (!hasTransparentAlphaNeighbor(data, width, height, index, 12)) continue;
+      const distance = Math.sqrt(colorDistanceToRgbSq(data, offset, backgroundColor));
+      if (distance > 172) continue;
+      const solidNeighbors = countSolidAlphaNeighbors(data, width, height, index, 96);
+      const keepFactor = solidNeighbors >= 6 ? 0.55 : 0.18;
+      nextAlpha[index] = Math.round(Math.min(alpha, clamp((distance - 64) / 108, 0, 1) * 255 * keepFactor));
+    }
+  }
+
+  for (let index = 0; index < nextAlpha.length; index += 1) {
+    data[index * 4 + 3] = nextAlpha[index];
+  }
+}
+
+function hasBackgroundNeighbor(mask, width, height, index) {
+  const x = index % width;
+  const y = Math.floor(index / width);
+  for (let oy = -1; oy <= 1; oy += 1) {
+    for (let ox = -1; ox <= 1; ox += 1) {
+      if (!ox && !oy) continue;
+      const px = x + ox;
+      const py = y + oy;
+      if (px < 0 || px >= width || py < 0 || py >= height) continue;
+      if (mask[py * width + px]) return true;
+    }
+  }
+  return false;
+}
+
+function hasTransparentAlphaNeighbor(data, width, height, index, threshold) {
+  const x = index % width;
+  const y = Math.floor(index / width);
+  for (let oy = -1; oy <= 1; oy += 1) {
+    for (let ox = -1; ox <= 1; ox += 1) {
+      if (!ox && !oy) continue;
+      const px = x + ox;
+      const py = y + oy;
+      if (px < 0 || px >= width || py < 0 || py >= height) continue;
+      if (data[(py * width + px) * 4 + 3] <= threshold) return true;
+    }
+  }
+  return false;
+}
+
+function countSolidAlphaNeighbors(data, width, height, index, threshold) {
+  const x = index % width;
+  const y = Math.floor(index / width);
+  let count = 0;
+  for (let oy = -1; oy <= 1; oy += 1) {
+    for (let ox = -1; ox <= 1; ox += 1) {
+      if (!ox && !oy) continue;
+      const px = x + ox;
+      const py = y + oy;
+      if (px < 0 || px >= width || py < 0 || py >= height) continue;
+      if (data[(py * width + px) * 4 + 3] >= threshold) count += 1;
+    }
+  }
+  return count;
+}
+
+function colorDistanceToRgbSq(data, offset, color) {
+  const dr = data[offset] - color[0];
+  const dg = data[offset + 1] - color[1];
+  const db = data[offset + 2] - color[2];
+  return (dr * dr + dg * dg + db * db) / 3;
 }
 
 async function scanAndRender() {

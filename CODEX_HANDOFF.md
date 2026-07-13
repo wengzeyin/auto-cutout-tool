@@ -23,6 +23,7 @@ This file is for continuing the project from another Codex thread or device.
   - `Track SVG fractional QA metric`
   - `Track small element QA scores`
   - `Add browser QA metric coverage and local model proxy`
+  - `Add solid background fast cutout`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -124,6 +125,15 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - Added a strong split-mode detector for tall, narrow repeated sticker stacks where independent stickers touch vertically and ordinary connected-component logic collapses a whole column into one element.
 - Added `touching-vertical-sticker-stacks` regression coverage to `qa/test-multi-split.mjs`; expected result is 9 elements, while continuous subjects still remain unsplit.
 - Full browser QA confirmed `11-sticker-pack.png` recovered from 3 elements back to 9 elements with no baseline regressions.
+
+### Solid Background Fast Cutout - Done
+
+- Added a local flood-fill cutout path for solid edge backgrounds so simple white/black background assets do not wait on the AI model.
+- Dark solid backgrounds are handled even when the general image-type classifier mislabels sticker sheets as photo-like; light solid backgrounds are limited to product/line-art/unknown cases so white-background stickers and illustrations still use the refined path.
+- Fast-path results skip generic matte refinement to avoid restoring dark background pixels as line art.
+- Added dark-halo cleanup for black backgrounds: near-black pixels touching transparent edges are suppressed while internal black text/lines remain.
+- Browser smoke test: black-background sticker mock completed in ~0.3s with transparent corners and `darkHaloRatio` 0; white paper mock completed in ~4.1s with transparent corners.
+- Full browser QA on `2026-07-13 14:18` passed with 15/15 rows, average score 4.79, and no baseline regressions.
 
 ## UI Pass Plan
 
