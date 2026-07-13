@@ -1,6 +1,6 @@
 # QA Run Summary
 
-Run time: 2026-07-13 16:50 Asia/Shanghai
+Run time: 2026-07-13 17:00 Asia/Shanghai
 
 Mode: mixed QA scenarios
 Export format: PNG / WebP / SVG validation
@@ -19,7 +19,7 @@ Export scale: 1x baseline with size checks
 - Line art risk: 0
 - Light region risk: 0
 - Semi-transparent core risk: 0
-- ZIP: `qa/run-output/cutout-batch-20260713-1650.zip`
+- ZIP: `qa/run-output/cutout-batch-20260713-1700.zip`
 - Raw report: `qa/run-output/qa-report.latest.json`
 - Browser QA metric coverage: SVG 7 / 7 rows, multi-element small metrics 4 / 4 rows
 
@@ -51,6 +51,7 @@ Export scale: 1x baseline with size checks
 - Dark-background line-art QA now ignores source pixels that match the detected dark background, so removed black canvas/background is not counted as lost line art.
 - Tightened dark-background matte cleanup gating so low-saturation black/white illustrations do not lose gray anti-aliased edges; `15-high-contrast-edge.png` returned to matte 5 and `edgeJaggednessScore` 0.2993.
 - Added angle-aware SVG cubic handle clamping so precise vector paths keep smoother QuickTrace-like filled outlines without overshooting corners; SVG QA now asserts `cubicHandleOutlierRatio` stays below 0.08.
+- Added readback-safe canvas context creation for pixel-scanning canvases and a browser QA gate for Canvas `willReadFrequently` warnings; this run completed with `consoleFailures: []` and `consoleMessages: []`.
 - Added browser QA metric coverage gates for `svgFractionalCoordinateRatio`, `clearSmallElementCount`, `smallElementScoreMax`, and `smallElementScoreAverage`.
 - Added local IMG.LY model-resource proxy/cache for localhost QA to avoid flaky browser-side CDN fetch failures.
 - Added repeated vertical sticker-stack splitting; `11-sticker-pack.png` now exports 9 elements instead of the failed 3-column grouping.

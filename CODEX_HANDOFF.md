@@ -6,7 +6,7 @@ This file is for continuing the project from another Codex thread or device.
 
 - Repo: `wengzeyin/auto-cutout-tool`
 - Branch: `main`
-- Last confirmed sync: `2026-07-13`, local `main` matches `origin/main` at `Gate dark background matte cleanup`.
+- Last confirmed sync: `2026-07-13`, local `main` matches `origin/main` at `Clamp SVG cubic trace handles`.
 - Pushed commits through `Polish UI icons and motion`:
   - `8da0f03 Improve split QA and Windows runner portability`
   - `Refine result-first UI workbench`
@@ -27,6 +27,7 @@ This file is for continuing the project from another Codex thread or device.
   - `Improve product matte routing`
   - `Relax product SVG grid alignment`
   - `Gate dark background matte cleanup`
+  - `Clamp SVG cubic trace handles`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -41,8 +42,9 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 ## Current Continuation Notes
 
 - The latest algorithm work has focused on making quality regressions measurable before changing more core behavior.
-- Current pushed head: `Clamp SVG cubic trace handles`.
+- Current pushed head: `Guard canvas readback performance`.
 - Safe next algorithm targets:
+  - Continue performance work around actual AI fallback timeouts, cancellation, and large-image scan scheduling.
   - Improve real matte behavior for light illustration interiors beyond synthetic coverage.
   - Continue SVG quality work: path simplification, color-region merging, and fewer editable paths without blocky outlines.
   - Tune multi-element splitting with real QA assets once full browser QA screenshots/reports are available.
@@ -174,6 +176,13 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - Added `cubicHandleOutlierRatio` regression coverage in `qa/test-svg-vector.mjs`; the SVG fixture currently reports `0`.
 - Full browser QA on `2026-07-13 16:50` passed with 15/15 rows, average score 4.79, 0 release blockers, and metric coverage intact.
 - Baseline comparison passed with no regressions; product SVG grid-alignment metrics remain improved across `05`, `06`, `09`, and `14`.
+
+### Canvas Readback Performance Guard - Done
+
+- Added `getReadbackContext()` and changed pixel-scanning canvases to request `{ willReadFrequently: true }` on their first 2D context creation, including source originals, cutout/refined canvases, masked element crop canvases, and vector-prep canvases.
+- Added a browser QA console gate in `qa/run-browser-qa.mjs`; full QA now fails on `pageerror` or Canvas `willReadFrequently` warnings instead of burying performance regressions in console output.
+- Full browser QA on `2026-07-13 17:00` passed with 15/15 rows, average score 4.79, 0 release blockers, `consoleFailures: []`, and `consoleMessages: []`.
+- Baseline comparison passed with no regressions in score, component count, large-box risk, small-element risk, matte, or SVG metrics.
 
 ## UI Pass Plan
 

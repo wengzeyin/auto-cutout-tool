@@ -130,8 +130,12 @@ const state = {
   selection: null,
 };
 
-const sourceCtx = els.sourceCanvas.getContext("2d", { willReadFrequently: true });
-const resultCtx = els.resultCanvas.getContext("2d", { willReadFrequently: true });
+function getReadbackContext(canvas) {
+  return canvas.getContext("2d", { willReadFrequently: true });
+}
+
+const sourceCtx = getReadbackContext(els.sourceCanvas);
+const resultCtx = getReadbackContext(els.resultCanvas);
 const overlayCtx = els.overlayCanvas.getContext("2d");
 
 const ICON_PATHS = {
@@ -1039,7 +1043,7 @@ async function loadItem(item) {
     const bitmap = await createImageBitmap(item.file);
     item.originalWidth = bitmap.width;
     item.originalHeight = bitmap.height;
-    drawBitmapToCanvas(bitmap, state.sourceOriginalCanvas, state.sourceOriginalCanvas.getContext("2d"), Infinity);
+    drawBitmapToCanvas(bitmap, state.sourceOriginalCanvas, getReadbackContext(state.sourceOriginalCanvas), Infinity);
     drawBitmapToCanvas(bitmap, els.sourceCanvas, sourceCtx);
     item.imageType = inferQaImageTypeFromScenario(item.qaScenario) || analyzeSourceImageType(state.sourceOriginalCanvas);
     state.imageType = item.imageType;
@@ -1048,9 +1052,9 @@ async function loadItem(item) {
 
     if (item.cutoutBlob) {
       const originalBitmap = await createImageBitmap(item.originalCutoutBlob || item.cutoutBlob);
-      drawBitmapToCanvas(originalBitmap, state.cutoutOriginalCanvas, state.cutoutOriginalCanvas.getContext("2d"), Infinity);
+      drawBitmapToCanvas(originalBitmap, state.cutoutOriginalCanvas, getReadbackContext(state.cutoutOriginalCanvas), Infinity);
       const resultBitmap = await createImageBitmap(item.filteredCutoutBlob || item.cutoutBlob);
-      drawBitmapToCanvas(resultBitmap, state.refinedCutoutCanvas, state.refinedCutoutCanvas.getContext("2d"), Infinity);
+      drawBitmapToCanvas(resultBitmap, state.refinedCutoutCanvas, getReadbackContext(state.refinedCutoutCanvas), Infinity);
       drawCanvasToPreview(state.refinedCutoutCanvas, els.resultCanvas, resultCtx);
       state.cutoutBlob = item.cutoutBlob;
       state.originalCutoutBlob = item.originalCutoutBlob || item.cutoutBlob;
@@ -1385,9 +1389,9 @@ async function processImage(options = {}) {
 
     state.originalCutoutBlob = blob;
     const bitmap = await createImageBitmap(blob);
-    drawBitmapToCanvas(bitmap, state.cutoutOriginalCanvas, state.cutoutOriginalCanvas.getContext("2d"), Infinity);
+    drawBitmapToCanvas(bitmap, state.cutoutOriginalCanvas, getReadbackContext(state.cutoutOriginalCanvas), Infinity);
     if (item?.fastCutout) {
-      drawBitmapToCanvas(bitmap, state.refinedCutoutCanvas, state.refinedCutoutCanvas.getContext("2d"), Infinity);
+      drawBitmapToCanvas(bitmap, state.refinedCutoutCanvas, getReadbackContext(state.refinedCutoutCanvas), Infinity);
       drawCanvasToPreview(state.refinedCutoutCanvas, els.resultCanvas, resultCtx);
       state.cutoutBlob = blob;
       state.matteWarnings = [];
@@ -1506,7 +1510,7 @@ function createSolidBackgroundCutoutCanvas(sourceCanvas, options = {}) {
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
-  canvas.getContext("2d").putImageData(output, 0, 0);
+  getReadbackContext(canvas).putImageData(output, 0, 0);
   return {
     canvas,
     backgroundKind: isDark ? "dark" : isLight ? "light" : "solid",
@@ -2006,7 +2010,7 @@ async function refineCutoutAlphaAsync(sourceCanvas, settings) {
     const canvas = document.createElement("canvas");
     canvas.width = response.imageData.width;
     canvas.height = response.imageData.height;
-    canvas.getContext("2d").putImageData(response.imageData, 0, 0);
+    getReadbackContext(canvas).putImageData(response.imageData, 0, 0);
     return { canvas, alphaNormalized: response.alphaNormalized };
   } catch (error) {
     console.warn("Matte worker fallback:", error);
@@ -5331,7 +5335,7 @@ function cropToCanvas(box, scale = 1) {
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(sw * scale));
   canvas.height = Math.max(1, Math.round(sh * scale));
-  const ctx = canvas.getContext("2d");
+  const ctx = getReadbackContext(canvas);
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
   ctx.drawImage(
@@ -6205,7 +6209,7 @@ async function cropItemComponentToExportBlob(item, box) {
   const source = document.createElement("canvas");
   source.width = bitmap.width;
   source.height = bitmap.height;
-  const sourceCtx = source.getContext("2d");
+  const sourceCtx = getReadbackContext(source);
   sourceCtx.drawImage(bitmap, 0, 0, source.width, source.height);
   const ratioX = source.width / Math.max(1, item.previewWidth || source.width);
   const ratioY = source.height / Math.max(1, item.previewHeight || source.height);
@@ -6218,7 +6222,7 @@ async function cropItemComponentToExportBlob(item, box) {
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(sw * scale));
   canvas.height = Math.max(1, Math.round(sh * scale));
-  const ctx = canvas.getContext("2d");
+  const ctx = getReadbackContext(canvas);
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
   ctx.drawImage(source, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
@@ -6714,7 +6718,7 @@ function prepareVectorCanvas(canvas, maxVectorEdge = 900) {
   const vectorCanvas = document.createElement("canvas");
   vectorCanvas.width = Math.max(1, Math.round(canvas.width * scale));
   vectorCanvas.height = Math.max(1, Math.round(canvas.height * scale));
-  const ctx = vectorCanvas.getContext("2d");
+  const ctx = getReadbackContext(vectorCanvas);
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
   ctx.drawImage(canvas, 0, 0, vectorCanvas.width, vectorCanvas.height);

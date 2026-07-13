@@ -67,9 +67,10 @@ try {
     cwd: root,
     encoding: "utf8",
   });
+  const consoleFailures = consoleMessages.filter(isBlockingConsoleMessage);
   const summaryPath = path.join(outputDir, "browser-qa-summary.json");
   const summary = {
-    pass: validation.status === 0 && metricCoverage.status === 0,
+    pass: validation.status === 0 && metricCoverage.status === 0 && consoleFailures.length === 0,
     port,
     explicitPort,
     zipPath,
@@ -80,11 +81,12 @@ try {
     metricCoverageStatus: metricCoverage.status,
     metricCoverageStdout: safeJson(metricCoverage.stdout),
     metricCoverageStderr: metricCoverage.stderr.trim(),
+    consoleFailures,
     consoleMessages: consoleMessages.slice(-80),
   };
   await writeFile(summaryPath, JSON.stringify(summary, null, 2));
   console.log(JSON.stringify(summary, null, 2));
-  process.exit(validation.status || metricCoverage.status || 0);
+  process.exit(validation.status || metricCoverage.status || (consoleFailures.length ? 1 : 0));
 } catch (error) {
   const screenshotPath = path.join(outputDir, "browser-qa-failure.png");
   try {
@@ -181,6 +183,10 @@ function safeJson(value) {
   } catch {
     return text;
   }
+}
+
+function isBlockingConsoleMessage(message) {
+  return /pageerror:|willReadFrequently/.test(message);
 }
 
 function findFreePort() {
