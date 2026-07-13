@@ -1,6 +1,6 @@
 # QA Run Summary
 
-Run time: 2026-07-13 18:12 Asia/Shanghai
+Run time: 2026-07-13 18:25 Asia/Shanghai
 
 Mode: mixed QA scenarios
 Export format: PNG / WebP / SVG validation
@@ -19,7 +19,7 @@ Export scale: 1x baseline with size checks
 - Line art risk: 0
 - Light region risk: 0
 - Semi-transparent core risk: 0
-- ZIP: `qa/run-output/cutout-batch-20260713-1812.zip`
+- ZIP: `qa/run-output/cutout-batch-20260713-1825.zip`
 - Raw report: `qa/run-output/qa-report.latest.json`
 - Browser QA metric coverage: SVG 7 / 7 rows, multi-element small metrics 4 / 4 rows
 
@@ -46,6 +46,8 @@ Export scale: 1x baseline with size checks
 ## Findings
 
 - Full 15-image QA validation passed with average score 4.79 and 0 release blockers.
+- Lowered the non-preserve photo dense-core neighborhood requirement from 15 to 12 matching pixels. Dense interiors normalize slightly more readily, while matte QA still keeps isolated fine hair at alpha 132 and post-edge hair at alpha 176.
+- Full browser QA kept the score baseline at 4.79 with no regressions; tracked photo semi-transparent core nudged down on `01`, `03`, and `04` without changing component or SVG risk.
 - Added a conservative product interior-light restoration guard: near-white product details are restored only when directional alpha support shows they are inside the subject. The new matte regression restores an interior product light strip to alpha 255 while keeping adjacent light background at alpha 0.
 - Tightened dark-background detail restoration for black-background sticker assets: source pixels matching the dark background are only restored as line art when they have real directional alpha support, preventing thick hidden black backgrounds from reappearing as outer outlines.
 - Added a matte regression for thick hidden black exterior strokes; `thickDarkRestoreExteriorAfter` stays at 0 while internal black line art remains protected.

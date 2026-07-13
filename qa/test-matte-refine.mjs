@@ -1148,7 +1148,7 @@ normalizeDenseCoreAlpha(denseCoreAfter, {
   imageType: "photo",
   denseCoreNormalizeThreshold: 112,
   denseCoreNeighborThreshold: 96,
-  denseCoreNeighborCount: 15,
+  denseCoreNeighborCount: 12,
   denseCoreTransparentThreshold: 8,
   denseCoreTransparentLimit: 3,
 });

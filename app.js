@@ -837,7 +837,7 @@ function buildMatteProfile(base, imageType = "unknown") {
     profile.postCoreNormalizePasses = 3;
     profile.denseCoreNormalizeThreshold = profile.fidelity === "preserve" ? 132 : 112;
     profile.denseCoreNeighborThreshold = profile.fidelity === "preserve" ? 118 : 96;
-    profile.denseCoreNeighborCount = profile.fidelity === "preserve" ? 17 : 15;
+    profile.denseCoreNeighborCount = profile.fidelity === "preserve" ? 17 : 12;
     profile.denseCoreTransparentThreshold = Math.max(8, profile.edgeLow);
     profile.denseCoreTransparentLimit = profile.fidelity === "preserve" ? 2 : 3;
     profile.postEdgeCoreNormalizeThreshold = profile.fidelity === "preserve" ? 142 : 124;

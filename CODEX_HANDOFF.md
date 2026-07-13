@@ -6,7 +6,7 @@ This file is for continuing the project from another Codex thread or device.
 
 - Repo: `wengzeyin/auto-cutout-tool`
 - Branch: `main`
-- Last confirmed sync: `2026-07-13`, local `main` includes the dark-background outline restoration fix and product light-detail regression patch.
+- Last confirmed sync: `2026-07-13`, local `main` includes product light-detail and photo dense-core regression patches.
 - Pushed commits through `Polish UI icons and motion`:
   - `8da0f03 Improve split QA and Windows runner portability`
   - `Refine result-first UI workbench`
@@ -35,6 +35,7 @@ This file is for continuing the project from another Codex thread or device.
   - `Normalize photo dense core alpha`
   - `Tighten dark background detail restore`
   - `Protect product interior light details`
+  - `Tune photo dense core neighborhood`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -49,7 +50,7 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 ## Current Continuation Notes
 
 - The latest algorithm work has focused on making quality regressions measurable before changing more core behavior.
-- Current pushed head before this patch: `Tighten dark background detail restore`; latest local patch protects product interior light details without changing the 15-image baseline metrics.
+- Current pushed head before this patch: `Protect product interior light details`; latest local patch slightly relaxes photo dense-core normalization without changing the 15-image baseline score.
 - Safe next algorithm targets:
   - Continue performance work around actual AI fallback timeouts, cancellation, and large-image scan scheduling.
   - Improve real matte behavior for light illustration interiors beyond synthetic coverage.
@@ -63,6 +64,12 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - Product light pixels are restored only when they look like near-white/tinted product surface and have directional alpha support from the existing cutout, avoiding restoration of adjacent light backgrounds.
 - Added matte regression coverage: an internal near-white product strip restores to alpha 255, while a nearby light background strip remains alpha 0.
 - Full browser QA on `2026-07-13 18:12` passed with 15/15 rows, average score 4.79, 0 release blockers, and no baseline regressions against `cutout-batch-20260713-1757.zip`.
+
+### Photo Dense Core Neighborhood - Done
+
+- Lowered non-preserve photo dense-core neighbor requirement from 15 to 12 matching pixels.
+- Matte QA still protects isolated fine hair (`denseHairAfter` 132, `postEdgeHairAfter` 176).
+- Full browser QA on `2026-07-13 18:25` passed with 15/15 rows, average score 4.79, 0 release blockers, and no baseline regressions against `cutout-batch-20260713-1812.zip`.
 
 ## Already Implemented Before UI Pass
 
