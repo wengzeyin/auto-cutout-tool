@@ -22,6 +22,7 @@ This file is for continuing the project from another Codex thread or device.
   - `Protect gray SVG line art`
   - `Track SVG fractional QA metric`
   - `Track small element QA scores`
+  - `Add browser QA metric coverage and local model proxy`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -40,7 +41,6 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - Safe next algorithm targets:
   - Improve real matte behavior for light illustration interiors beyond synthetic coverage.
   - Continue SVG quality work: path simplification, color-region merging, and fewer editable paths without blocky outlines.
-  - Add browser QA coverage that asserts the new metrics (`svgFractionalCoordinateRatio`, `clearSmallElementCount`, `smallElementScoreMax`, `smallElementScoreAverage`) appear in real generated reports.
   - Tune multi-element splitting with real QA assets once full browser QA screenshots/reports are available.
 - Before changing algorithm thresholds, run the lightweight QA list at the bottom of this file. For larger behavior changes, run browser QA and compare against the previous report.
 
@@ -105,6 +105,25 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - Tightened `smallElementRisk` for multi-sticker cases so low-quality small detections can be flagged when no clear small element is found.
 - Added validation and report-comparison gates for small-element scores in `qa/validate-report.mjs` and `qa/compare-report.mjs`.
 - Confirmed lightweight QA still passes across matte, image type, multi-split, SVG, report validation, report comparison, runner health, and summary risk checks.
+
+### Browser QA Metric Coverage - Done
+
+- Added `qa/assert-report-metric-coverage.mjs` to assert real generated browser QA reports include `svgFractionalCoordinateRatio`, `clearSmallElementCount`, `smallElementScoreMax`, and `smallElementScoreAverage` in the expected scenario rows.
+- Wired the coverage assertion into `qa/run-browser-qa.mjs`; full browser QA now fails if either score validation or real metric coverage fails.
+- Added `qa/test-report-metric-coverage.mjs` for pass/fail fixture coverage.
+- Full browser QA on `2026-07-13` passed with 15/15 rows, average score 4.79, and metric coverage `svgMetricRows: 7/7`, `smallElementMetricRows: 4/4`.
+
+### Local Model Resource Proxy - Done
+
+- Added a local `/__imgly/` proxy in `server.mjs` for IMG.LY background-removal resources during localhost/QA runs.
+- The proxy caches resources under `.cache-imgly/`, retries remote fetches, and avoids fragile browser-side CDN failures during automated QA.
+- `app.js` now points `removeBackground` to the local proxy only on `localhost` / `127.0.0.1`; GitHub Pages continues using the library default remote public path.
+
+### Repeated Sticker Stack Split - Done
+
+- Added a strong split-mode detector for tall, narrow repeated sticker stacks where independent stickers touch vertically and ordinary connected-component logic collapses a whole column into one element.
+- Added `touching-vertical-sticker-stacks` regression coverage to `qa/test-multi-split.mjs`; expected result is 9 elements, while continuous subjects still remain unsplit.
+- Full browser QA confirmed `11-sticker-pack.png` recovered from 3 elements back to 9 elements with no baseline regressions.
 
 ## UI Pass Plan
 
