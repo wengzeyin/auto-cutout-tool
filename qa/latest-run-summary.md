@@ -1,6 +1,6 @@
 # QA Run Summary
 
-Run time: 2026-07-13 14:18 Asia/Shanghai
+Run time: 2026-07-13 15:39 Asia/Shanghai
 
 Mode: mixed QA scenarios
 Export format: PNG / WebP / SVG validation
@@ -19,7 +19,7 @@ Export scale: 1x baseline with size checks
 - Line art risk: 0
 - Light region risk: 0
 - Semi-transparent core risk: 0
-- ZIP: `qa/run-output/cutout-batch-20260713-1418.zip`
+- ZIP: `qa/run-output/cutout-batch-20260713-1539.zip`
 - Raw report: `qa/run-output/qa-report.latest.json`
 - Browser QA metric coverage: SVG 7 / 7 rows, multi-element small metrics 4 / 4 rows
 
@@ -49,7 +49,8 @@ Export scale: 1x baseline with size checks
 - Added browser QA metric coverage gates for `svgFractionalCoordinateRatio`, `clearSmallElementCount`, `smallElementScoreMax`, and `smallElementScoreAverage`.
 - Added local IMG.LY model-resource proxy/cache for localhost QA to avoid flaky browser-side CDN fetch failures.
 - Added repeated vertical sticker-stack splitting; `11-sticker-pack.png` now exports 9 elements instead of the failed 3-column grouping.
-- Added solid-background fast cutout for white/black pure-background assets; black-background sticker smoke test completed in ~0.3s with no dark halo, and white paper smoke test completed in ~4.1s.
+- Added solid-background fast cutout for white/black pure-background assets; black-background sticker regression completed in ~0.31s with no dark halo, and white paper regression completed in ~0.21s with no IMG.LY model-resource requests.
+- Reduced light-solid flood tolerance so beige/light subjects are no longer swallowed into the white background mask.
 - QA comparison against the previous baseline passed with no regressions in score, component count, large-box risk, small-element risk, matte, or SVG metrics.
 - Current algorithmic limiting cases remain: photo-like semi-transparent core on curly/short fur and complex-background person, product edge jaggedness, and complex-background product light-region loss.
 

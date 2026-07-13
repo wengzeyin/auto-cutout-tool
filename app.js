@@ -1401,11 +1401,12 @@ async function tryFastSolidBackgroundCutout(item) {
   const imageType = normalizeImageType(item.imageType || state.imageType || "unknown");
   const result = createSolidBackgroundCutoutCanvas(state.sourceOriginalCanvas, { imageType });
   if (!result) return null;
-  if (imageType === "transparentMaterial") return null;
-  if (imageType === "photo" && result.backgroundKind !== "dark") return null;
+  if (imageType === "transparentMaterial" && !result.foreground?.simpleLightSubject) return null;
+  if (imageType === "photo" && result.backgroundKind !== "dark" && !result.foreground?.simpleLightSubject) return null;
   if (
     result.backgroundKind !== "dark" &&
-    (imageType === "sticker" || imageType === "illustration")
+    (imageType === "sticker" || imageType === "illustration") &&
+    !result.foreground?.simpleLightSubject
   ) return null;
 
   setBusy(true, result.backgroundKind === "dark"
@@ -1435,7 +1436,7 @@ function createSolidBackgroundCutoutCanvas(sourceCanvas, options = {}) {
   const tolerance = isDark
     ? 82
     : isLight
-      ? 52
+      ? 30
       : 42;
   const mask = floodBackgroundMask(imageData, background.color, tolerance);
   const backgroundCount = mask.reduce((sum, value) => sum + value, 0);
@@ -1452,6 +1453,75 @@ function createSolidBackgroundCutoutCanvas(sourceCanvas, options = {}) {
     canvas,
     backgroundKind: isDark ? "dark" : isLight ? "light" : "solid",
     backgroundRatio,
+    foreground: measureSolidBackgroundForeground(imageData, mask),
+  };
+}
+
+function measureSolidBackgroundForeground(imageData, backgroundMask) {
+  const { width, height, data } = imageData;
+  const colors = new Set();
+  let count = 0;
+  let saturated = 0;
+  let lowSaturation = 0;
+  let lightColored = 0;
+  let dark = 0;
+  let totalSaturation = 0;
+  let totalLightness = 0;
+  let totalGradient = 0;
+  let gradientSamples = 0;
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const index = y * width + x;
+      if (backgroundMask[index]) continue;
+      const offset = index * 4;
+      if (data[offset + 3] < 32) continue;
+      const metrics = colorMetrics(data[offset], data[offset + 1], data[offset + 2]);
+      count += 1;
+      colors.add(`${data[offset] >> 4},${data[offset + 1] >> 4},${data[offset + 2] >> 4}`);
+      totalSaturation += metrics.saturation;
+      totalLightness += metrics.lightness;
+      if (metrics.saturation > 0.32) saturated += 1;
+      if (metrics.saturation < 0.18) lowSaturation += 1;
+      if (metrics.lightness > 140 && metrics.lightness < 248 && metrics.saturation < 0.24) lightColored += 1;
+      if (metrics.lightness < 82) dark += 1;
+      if (x < width - 1 && y < height - 1) {
+        const right = offset + 4;
+        const down = ((y + 1) * width + x) * 4;
+        totalGradient +=
+          Math.abs(data[offset] - data[right]) + Math.abs(data[offset + 1] - data[right + 1]) + Math.abs(data[offset + 2] - data[right + 2]) +
+          Math.abs(data[offset] - data[down]) + Math.abs(data[offset + 1] - data[down + 1]) + Math.abs(data[offset + 2] - data[down + 2]);
+        gradientSamples += 1;
+      }
+    }
+  }
+
+  const areaRatio = count / Math.max(1, width * height);
+  const saturatedRatio = saturated / Math.max(1, count);
+  const lowSaturationRatio = lowSaturation / Math.max(1, count);
+  const lightColoredRatio = lightColored / Math.max(1, count);
+  const darkRatio = dark / Math.max(1, count);
+  const averageSaturation = totalSaturation / Math.max(1, count);
+  const averageLightness = totalLightness / Math.max(1, count);
+  const uniqueRatio = colors.size / Math.max(1, count);
+  const averageGradient = totalGradient / Math.max(1, gradientSamples);
+  return {
+    areaRatio,
+    saturatedRatio,
+    lowSaturationRatio,
+    lightColoredRatio,
+    darkRatio,
+    averageSaturation,
+    averageLightness,
+    uniqueRatio,
+    averageGradient,
+    simpleLightSubject:
+      areaRatio > 0.035 &&
+      areaRatio < 0.68 &&
+      averageLightness > 135 &&
+      darkRatio < 0.28 &&
+      uniqueRatio < 0.08 &&
+      averageGradient < 80,
   };
 }
 

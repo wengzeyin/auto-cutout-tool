@@ -6,7 +6,7 @@ This file is for continuing the project from another Codex thread or device.
 
 - Repo: `wengzeyin/auto-cutout-tool`
 - Branch: `main`
-- Last confirmed sync: `2026-07-13`, local `main` matches `origin/main` at `Track small element QA scores`.
+- Last confirmed sync: `2026-07-13`, local `main` matches `origin/main` at `Cover solid background fast cutout`.
 - Pushed commits through `Polish UI icons and motion`:
   - `8da0f03 Improve split QA and Windows runner portability`
   - `Refine result-first UI workbench`
@@ -38,7 +38,7 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 ## Current Continuation Notes
 
 - The latest algorithm work has focused on making quality regressions measurable before changing more core behavior.
-- Current pushed head: `Track small element QA scores`.
+- Current pushed head: `Cover solid background fast cutout`.
 - Safe next algorithm targets:
   - Improve real matte behavior for light illustration interiors beyond synthetic coverage.
   - Continue SVG quality work: path simplification, color-region merging, and fewer editable paths without blocky outlines.
@@ -129,11 +129,13 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 ### Solid Background Fast Cutout - Done
 
 - Added a local flood-fill cutout path for solid edge backgrounds so simple white/black background assets do not wait on the AI model.
-- Dark solid backgrounds are handled even when the general image-type classifier mislabels sticker sheets as photo-like; light solid backgrounds are limited to product/line-art/unknown cases so white-background stickers and illustrations still use the refined path.
+- Dark solid backgrounds are handled even when the general image-type classifier mislabels sticker sheets as photo-like; light solid backgrounds now allow simple low-complexity paper/product subjects even when the broad classifier routes them through photo/sticker/illustration protection.
 - Fast-path results skip generic matte refinement to avoid restoring dark background pixels as line art.
 - Added dark-halo cleanup for black backgrounds: near-black pixels touching transparent edges are suppressed while internal black text/lines remain.
-- Browser smoke test: black-background sticker mock completed in ~0.3s with transparent corners and `darkHaloRatio` 0; white paper mock completed in ~4.1s with transparent corners.
-- Full browser QA on `2026-07-13 14:18` passed with 15/15 rows, average score 4.79, and no baseline regressions.
+- Reduced light-solid flood tolerance from 52 to 30 because the RGB distance helper is averaged; the previous value could treat beige paper as white background and force the slow AI fallback.
+- Added `qa/test-solid-background-fast-cutout.mjs` to assert black and white solid-background mocks finish quickly, keep transparent corners, avoid IMG.LY model requests, and do not create black edge halos.
+- Browser regression test: black-background sticker mock completed in ~0.31s with `darkHaloRatio` 0; white paper mock completed in ~0.21s with no model-resource requests.
+- Full browser QA on `2026-07-13 15:39` passed with 15/15 rows, average score 4.79, and no baseline regressions.
 
 ## UI Pass Plan
 
@@ -191,4 +193,6 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
   - `node qa/test-compare-report.mjs`
   - `node qa/test-runner-health.mjs`
   - `node qa/test-summary-risk.mjs`
+  - `node qa/test-report-metric-coverage.mjs`
+  - `node qa/test-solid-background-fast-cutout.mjs`
 - For UI-only edits, also manually check upload, process, result download, and mobile layout.
