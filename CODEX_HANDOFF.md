@@ -6,7 +6,7 @@ This file is for continuing the project from another Codex thread or device.
 
 - Repo: `wengzeyin/auto-cutout-tool`
 - Branch: `main`
-- Last confirmed sync: `2026-07-13`, local `main` matches `origin/main` at `Clamp SVG cubic trace handles`.
+- Last confirmed sync: `2026-07-13`, local `main` matches `origin/main` at `Guard canvas readback performance`.
 - Pushed commits through `Polish UI icons and motion`:
   - `8da0f03 Improve split QA and Windows runner portability`
   - `Refine result-first UI workbench`
@@ -28,6 +28,7 @@ This file is for continuing the project from another Codex thread or device.
   - `Relax product SVG grid alignment`
   - `Gate dark background matte cleanup`
   - `Clamp SVG cubic trace handles`
+  - `Guard canvas readback performance`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -42,7 +43,7 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 ## Current Continuation Notes
 
 - The latest algorithm work has focused on making quality regressions measurable before changing more core behavior.
-- Current pushed head: `Guard canvas readback performance`.
+- Current pushed head: `Add AI timeout guard`.
 - Safe next algorithm targets:
   - Continue performance work around actual AI fallback timeouts, cancellation, and large-image scan scheduling.
   - Improve real matte behavior for light illustration interiors beyond synthetic coverage.
@@ -184,6 +185,14 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - Full browser QA on `2026-07-13 17:00` passed with 15/15 rows, average score 4.79, 0 release blockers, `consoleFailures: []`, and `consoleMessages: []`.
 - Baseline comparison passed with no regressions in score, component count, large-box risk, small-element risk, matte, or SVG metrics.
 
+### AI Timeout Guard - Done
+
+- Wrapped the IMG.LY `removeBackground` call in `runAiBackgroundRemoval()` with a timeout guard so a hanging AI/model path returns control to the UI instead of leaving the user waiting indefinitely.
+- Timeout duration scales for large images and can be shortened through `window.__cutoutDebug.aiTimeoutMs` for QA; default normal-image timeout is 180s.
+- Added `qa/test-ai-timeout-guard.mjs`, which simulates a non-solid image whose AI task never resolves and verifies the page recovers in under 1s, shows a timeout message, re-enables the process button, hides progress, and marks the queue item as failed.
+- Full browser QA on `2026-07-13 17:07` passed with 15/15 rows, average score 4.79, 0 release blockers, `consoleFailures: []`, and `consoleMessages: []`.
+- Baseline comparison passed with no regressions in score, component count, large-box risk, small-element risk, matte, or SVG metrics.
+
 ## UI Pass Plan
 
 ### Stage 1: P0 Result-First Layout - Done
@@ -236,6 +245,7 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
   - `node qa/test-image-type.mjs`
   - `node qa/test-multi-split.mjs`
   - `node qa/test-svg-vector.mjs`
+  - `node qa/test-ai-timeout-guard.mjs`
   - `node qa/test-validate-report.mjs`
   - `node qa/test-compare-report.mjs`
   - `node qa/test-runner-health.mjs`

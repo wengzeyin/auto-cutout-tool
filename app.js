@@ -137,6 +137,7 @@ function getReadbackContext(canvas) {
 const sourceCtx = getReadbackContext(els.sourceCanvas);
 const resultCtx = getReadbackContext(els.resultCanvas);
 const overlayCtx = els.overlayCanvas.getContext("2d");
+const DEFAULT_AI_TIMEOUT_MS = 180000;
 
 const ICON_PATHS = {
   add: ["M12 5v14", "M5 12h14"],
@@ -1371,19 +1372,7 @@ async function processImage(options = {}) {
   try {
     let blob = await tryFastSolidBackgroundCutout(item);
     if (!blob) {
-      blob = await removeBackground(state.file, {
-        ...getBackgroundRemovalResourceConfig(),
-        model: els.modelSelect.value,
-        device: "cpu",
-        output: { format: "image/png", type: "foreground" },
-        progress: (key, current, total) => {
-          if (total) {
-            const percent = Math.round((current / total) * 100);
-            setBusy(true, `正在下载/加载 ${key}：${percent}%`);
-            setProgress(percent, `${percent}%`);
-          }
-        },
-      });
+      blob = await runAiBackgroundRemoval(state.file, item);
     }
     if (token !== state.processingToken || item !== state.currentItem) return;
 
@@ -1447,6 +1436,48 @@ function getBackgroundRemovalResourceConfig() {
   return {
     publicPath: new URL("./__imgly/", window.location.href).toString(),
   };
+}
+
+async function runAiBackgroundRemoval(file, item) {
+  const timeoutMs = getAiTimeoutMs(item);
+  const options = {
+    ...getBackgroundRemovalResourceConfig(),
+    model: els.modelSelect.value,
+    device: "cpu",
+    output: { format: "image/png", type: "foreground" },
+    progress: (key, current, total) => {
+      if (total) {
+        const percent = Math.round((current / total) * 100);
+        setBusy(true, `正在下载/加载 ${key}：${percent}%`);
+        setProgress(percent, `${percent}%`);
+      }
+    },
+  };
+  const aiTask = window.__cutoutDebug?.simulateAiHang
+    ? new Promise(() => {})
+    : removeBackground(file, options);
+  return promiseWithTimeout(
+    aiTask,
+    timeoutMs,
+    `AI 抠图超过 ${Math.max(1, Math.ceil(timeoutMs / 1000))} 秒仍未完成。请取消后重试、换用快速模型，或先压缩超大图片。`,
+  );
+}
+
+function getAiTimeoutMs(item) {
+  const debugTimeout = Number(window.__cutoutDebug?.aiTimeoutMs || 0);
+  if (debugTimeout > 0) return debugTimeout;
+  const maxEdge = Math.max(item?.originalWidth || 0, item?.originalHeight || 0);
+  if (maxEdge > 4500) return DEFAULT_AI_TIMEOUT_MS * 2;
+  if (maxEdge > 3000) return Math.round(DEFAULT_AI_TIMEOUT_MS * 1.5);
+  return DEFAULT_AI_TIMEOUT_MS;
+}
+
+function promiseWithTimeout(promise, timeoutMs, message) {
+  let timer = 0;
+  return new Promise((resolve, reject) => {
+    timer = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+    Promise.resolve(promise).then(resolve, reject).finally(() => window.clearTimeout(timer));
+  });
 }
 
 async function tryFastSolidBackgroundCutout(item) {
