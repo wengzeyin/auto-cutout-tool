@@ -6,7 +6,7 @@ This file is for continuing the project from another Codex thread or device.
 
 - Repo: `wengzeyin/auto-cutout-tool`
 - Branch: `main`
-- Last confirmed sync: `2026-07-13`, local `main` matches `origin/main` at `Close SVG micro gaps and guard dark restore`.
+- Last confirmed sync: `2026-07-13`, local `main` includes the dark-background outline restoration fix.
 - Pushed commits through `Polish UI icons and motion`:
   - `8da0f03 Improve split QA and Windows runner portability`
   - `Refine result-first UI workbench`
@@ -33,6 +33,7 @@ This file is for continuing the project from another Codex thread or device.
   - `Protect clear tiny split elements`
   - `Close SVG micro gaps and guard dark restore`
   - `Normalize photo dense core alpha`
+  - `Tighten dark background detail restore`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -47,7 +48,7 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 ## Current Continuation Notes
 
 - The latest algorithm work has focused on making quality regressions measurable before changing more core behavior.
-- Current pushed head: `Normalize photo dense core alpha`.
+- Current pushed head before this handoff edit: `Normalize photo dense core alpha`; latest local patch fixes thick black-background outline restoration.
 - Safe next algorithm targets:
   - Continue performance work around actual AI fallback timeouts, cancellation, and large-image scan scheduling.
   - Improve real matte behavior for light illustration interiors beyond synthetic coverage.

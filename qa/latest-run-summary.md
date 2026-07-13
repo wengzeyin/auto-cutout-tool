@@ -1,6 +1,6 @@
 # QA Run Summary
 
-Run time: 2026-07-13 17:47 Asia/Shanghai
+Run time: 2026-07-13 17:57 Asia/Shanghai
 
 Mode: mixed QA scenarios
 Export format: PNG / WebP / SVG validation
@@ -19,7 +19,7 @@ Export scale: 1x baseline with size checks
 - Line art risk: 0
 - Light region risk: 0
 - Semi-transparent core risk: 0
-- ZIP: `qa/run-output/cutout-batch-20260713-1747.zip`
+- ZIP: `qa/run-output/cutout-batch-20260713-1757.zip`
 - Raw report: `qa/run-output/qa-report.latest.json`
 - Browser QA metric coverage: SVG 7 / 7 rows, multi-element small metrics 4 / 4 rows
 
@@ -46,6 +46,8 @@ Export scale: 1x baseline with size checks
 ## Findings
 
 - Full 15-image QA validation passed with average score 4.79 and 0 release blockers.
+- Tightened dark-background detail restoration for black-background sticker assets: source pixels matching the dark background are only restored as line art when they have real directional alpha support, preventing thick hidden black backgrounds from reappearing as outer outlines.
+- Added a matte regression for thick hidden black exterior strokes; `thickDarkRestoreExteriorAfter` stays at 0 while internal black line art remains protected.
 - Added connected dark-background fringe cleanup for black-background sticker assets. The cleanup removes generated near-black/gray outlines connected to transparent background while preserving internal black text/lines.
 - The black-background fast-cutout regression now covers a thicker dark halo case; `black`, `black-halo`, and `white` solid-background mocks all complete locally in under 1s with `darkHaloRatio` 0 and no IMG.LY model-resource requests.
 - Dark-background line-art QA now ignores source pixels that match the detected dark background, so removed black canvas/background is not counted as lost line art.

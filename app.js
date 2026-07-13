@@ -2459,9 +2459,13 @@ function restoreIllustrationDetails(cutoutCanvas, originalCanvas, settings) {
     const nearWhite = metrics.lightness > 246 && metrics.saturation < 0.12;
     const x = index % width;
     const y = Math.floor(index / width);
-    const sourceDarkBackgroundPixel = isSourceDarkBackgroundPixel(original.data, offset, metrics, settings)
-      && hasTransparentNeighbor(result.data, width, height, x, y, 3, 1);
-    if (sourceDarkBackgroundPixel) {
+    const sourceDarkBackgroundPixel = isSourceDarkBackgroundPixel(original.data, offset, metrics, settings);
+    const darkBackgroundExterior = sourceDarkBackgroundPixel
+      && (
+        hasTransparentNeighbor(result.data, width, height, x, y, settings.darkFringeAggressive ? 9 : 6, 1)
+        || !hasDirectionalAlphaSupport(result.data, width, height, x, y, 5, 96)
+      );
+    if (darkBackgroundExterior) {
       result.data[offset + 3] = 0;
       continue;
     }
@@ -2473,7 +2477,8 @@ function restoreIllustrationDetails(cutoutCanvas, originalCanvas, settings) {
       );
     if (nearWhite && !protectedInteriorWhite) continue;
 
-    const darkStroke = protectLineArt(metrics, settings);
+    const darkStroke = protectLineArt(metrics, settings)
+      && (!sourceDarkBackgroundPixel || hasDirectionalAlphaSupport(result.data, width, height, x, y, 5, 96));
     const coloredFill = metrics.saturation > 0.24 && metrics.lightness < 242;
     const protectedLightFill = protectLightRegion(red, green, blue, metrics, settings);
     const protectedWarmOrCool = protectWarmCoolDetail(red, green, blue, metrics, settings);
