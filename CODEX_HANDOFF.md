@@ -6,7 +6,7 @@ This file is for continuing the project from another Codex thread or device.
 
 - Repo: `wengzeyin/auto-cutout-tool`
 - Branch: `main`
-- Last confirmed sync: `2026-07-13`, local `main` matches `origin/main` at `Relax product SVG grid alignment`.
+- Last confirmed sync: `2026-07-13`, local `main` matches `origin/main` at `Gate dark background matte cleanup`.
 - Pushed commits through `Polish UI icons and motion`:
   - `8da0f03 Improve split QA and Windows runner portability`
   - `Refine result-first UI workbench`
@@ -26,6 +26,7 @@ This file is for continuing the project from another Codex thread or device.
   - `Add solid background fast cutout`
   - `Improve product matte routing`
   - `Relax product SVG grid alignment`
+  - `Gate dark background matte cleanup`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -40,7 +41,7 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 ## Current Continuation Notes
 
 - The latest algorithm work has focused on making quality regressions measurable before changing more core behavior.
-- Current pushed head: `Gate dark background matte cleanup`.
+- Current pushed head: `Clamp SVG cubic trace handles`.
 - Safe next algorithm targets:
   - Improve real matte behavior for light illustration interiors beyond synthetic coverage.
   - Continue SVG quality work: path simplification, color-region merging, and fewer editable paths without blocky outlines.
@@ -165,6 +166,14 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - Tightened dark-background matte cleanup gating so low-saturation black/white illustrations keep gray anti-aliased edges instead of being treated as black-background sticker fringe.
 - Full browser QA on `2026-07-13 16:43` passed with 15/15 rows, average score 4.79, 0 release blockers, and metric coverage intact.
 - Baseline comparison passed with no regressions; `15-high-contrast-edge.png` recovered to matte 5 and `edgeJaggednessScore` 0.2993 while black-background sticker halo tests still report `darkHaloRatio` 0.
+
+### SVG Cubic Handle Clamping - Done
+
+- Added angle-aware cubic control-point scaling for precise SVG paths so sharp corners keep shorter handles while smooth curves still use cubic output.
+- Clamped cubic handles relative to their traced segment length, with a tighter limit for protected line-art paths, reducing overshoot and the visible line-drawing feel in filled SVG exports.
+- Added `cubicHandleOutlierRatio` regression coverage in `qa/test-svg-vector.mjs`; the SVG fixture currently reports `0`.
+- Full browser QA on `2026-07-13 16:50` passed with 15/15 rows, average score 4.79, 0 release blockers, and metric coverage intact.
+- Baseline comparison passed with no regressions; product SVG grid-alignment metrics remain improved across `05`, `06`, `09`, and `14`.
 
 ## UI Pass Plan
 

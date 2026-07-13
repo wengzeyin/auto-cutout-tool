@@ -44,6 +44,7 @@ const commandDensity = commandCount / Math.max(1, Math.sqrt(visibleArea));
 const gridAlignedRatio = measureGridAlignedCoordinateRatio(paths);
 const fractionalCoordinateRatio = measureFractionalCoordinateRatio(paths);
 const hasCubic = /C/.test(paths);
+const cubicHandleOutlierRatio = measureCubicHandleOutlierRatio(paths);
 const tinyBlueGroup = [...groups.entries()].find(([key, group]) => group.area >= 18 && group.area <= 40 && keyIsBlue(key))?.[1];
 const tinyBlueHasCubic = Boolean(tinyBlueGroup && /C/.test(tinyBlueGroup.path));
 const hasOpacityGroups = [...groups.keys()].some((key) => !key.endsWith("|1"));
@@ -57,6 +58,7 @@ const failures = [];
 if (pathCount < 3 || pathCount > 10) failures.push(`Expected 3-10 paths, got ${pathCount}.`);
 if (!hasCubic) failures.push("Expected precise SVG to include cubic curve commands.");
 if (!tinyBlueHasCubic) failures.push("Expected small precise-mode details to use cubic paths instead of blocky straight-line boxes.");
+if (cubicHandleOutlierRatio > 0.08) failures.push(`Expected cubic handles to stay near their traced segments, got outlier ratio ${cubicHandleOutlierRatio.toFixed(3)}.`);
 if (hasOpacityGroups) failures.push("Expected precise flat artwork SVG to merge alpha into solid color paths.");
 if (commandDensity > 18) failures.push(`Command density ${commandDensity.toFixed(2)} is too high.`);
 if (commandCount > 650) failures.push(`Command count ${commandCount} is too high for simple flat artwork.`);
@@ -125,6 +127,7 @@ const result = {
   commandDensity: Math.round(commandDensity * 100) / 100,
   gridAlignedRatio: Math.round(gridAlignedRatio * 100) / 100,
   fractionalCoordinateRatio: Math.round(fractionalCoordinateRatio * 100) / 100,
+  cubicHandleOutlierRatio: Math.round(cubicHandleOutlierRatio * 1000) / 1000,
   tinyRegionCount,
   darkArea: darkGroup?.area || 0,
   grayLineArea,
@@ -496,11 +499,47 @@ function loopToCubicPath(loop, vectorSettings) {
     const p1 = points[index];
     const p2 = points[(index + 1) % points.length];
     const p3 = points[(index + 2) % points.length];
-    const cp1 = [p1[0] + ((p2[0] - p0[0]) * tension) / 6, p1[1] + ((p2[1] - p0[1]) * tension) / 6];
-    const cp2 = [p2[0] - ((p3[0] - p1[0]) * tension) / 6, p2[1] - ((p3[1] - p1[1]) * tension) / 6];
+    const [cp1, cp2] = cubicControlPoints(p0, p1, p2, p3, tension, vectorSettings);
     d += `C${roundPathNumber(cp1[0])} ${roundPathNumber(cp1[1])} ${roundPathNumber(cp2[0])} ${roundPathNumber(cp2[1])} ${roundPathNumber(p2[0])} ${roundPathNumber(p2[1])}`;
   }
   return `${d}Z`;
+}
+
+function cubicControlPoints(p0, p1, p2, p3, tension, vectorSettings = {}) {
+  const segmentLength = Math.max(0.01, Math.hypot(p2[0] - p1[0], p2[1] - p1[1]));
+  const cornerScale = Math.min(
+    cubicCornerTensionScale(p0, p1, p2),
+    cubicCornerTensionScale(p1, p2, p3),
+  );
+  const localTension = tension * cornerScale;
+  let cp1 = [p1[0] + ((p2[0] - p0[0]) * localTension) / 6, p1[1] + ((p2[1] - p0[1]) * localTension) / 6];
+  let cp2 = [p2[0] - ((p3[0] - p1[0]) * localTension) / 6, p2[1] - ((p3[1] - p1[1]) * localTension) / 6];
+  const maxHandleRatio = vectorSettings.protectLineArt ? 0.34 : 0.42;
+  cp1 = clampHandleToAnchor(cp1, p1, segmentLength * maxHandleRatio);
+  cp2 = clampHandleToAnchor(cp2, p2, segmentLength * maxHandleRatio);
+  return [cp1, cp2];
+}
+
+function cubicCornerTensionScale(prev, point, next) {
+  const ax = point[0] - prev[0];
+  const ay = point[1] - prev[1];
+  const bx = next[0] - point[0];
+  const by = next[1] - point[1];
+  const lengthA = Math.hypot(ax, ay);
+  const lengthB = Math.hypot(bx, by);
+  if (lengthA < 0.01 || lengthB < 0.01) return 0.65;
+  const cosine = clamp((ax * bx + ay * by) / (lengthA * lengthB), -1, 1);
+  const turn = (1 - cosine) / 2;
+  return clamp(1 - turn * 0.48, 0.48, 1);
+}
+
+function clampHandleToAnchor(handle, anchor, maxDistance) {
+  const dx = handle[0] - anchor[0];
+  const dy = handle[1] - anchor[1];
+  const distance = Math.hypot(dx, dy);
+  if (distance <= maxDistance || distance < 0.001) return handle;
+  const scale = maxDistance / distance;
+  return [anchor[0] + dx * scale, anchor[1] + dy * scale];
 }
 
 function relaxVectorOutline(points, vectorSettings = {}) {
@@ -637,6 +676,33 @@ function measureFractionalCoordinateRatio(path) {
   if (!values.length) return 0;
   const fractional = values.filter((value) => Math.abs(value - Math.round(value)) >= 0.08).length;
   return fractional / values.length;
+}
+
+function measureCubicHandleOutlierRatio(path) {
+  const tokens = path.match(/[MCZ]|-?\d+(?:\.\d+)?/g) || [];
+  let cursor = [0, 0];
+  let cubicCount = 0;
+  let outliers = 0;
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token === "M") {
+      cursor = [Number(tokens[index + 1]), Number(tokens[index + 2])];
+      index += 2;
+    } else if (token === "C") {
+      const cp1 = [Number(tokens[index + 1]), Number(tokens[index + 2])];
+      const cp2 = [Number(tokens[index + 3]), Number(tokens[index + 4])];
+      const end = [Number(tokens[index + 5]), Number(tokens[index + 6])];
+      const segmentLength = Math.max(0.01, Math.hypot(end[0] - cursor[0], end[1] - cursor[1]));
+      if (
+        Math.hypot(cp1[0] - cursor[0], cp1[1] - cursor[1]) > segmentLength * 0.5 ||
+        Math.hypot(cp2[0] - end[0], cp2[1] - end[1]) > segmentLength * 0.5
+      ) outliers += 1;
+      cubicCount += 1;
+      cursor = end;
+      index += 6;
+    }
+  }
+  return outliers / Math.max(1, cubicCount);
 }
 
 function colorMetrics(red, green, blue) {
