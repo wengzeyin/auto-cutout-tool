@@ -91,6 +91,33 @@ if (photoCommandDensity > 10) failures.push(`Expected auto photo SVG command den
 if (photoTinyRegionCount > 0) failures.push(`Expected photo-like speckles to merge away, got ${photoTinyRegionCount}.`);
 if (!photoHasOpacityGroups) failures.push("Expected photo-like SVG to keep alpha groups for soft material edges.");
 
+const productLike = makeProductLikeImageData(280, 220);
+const productVectorSettings = {
+  mode: "auto",
+  colorStep: 72,
+  minRegionRatio: 0.00022,
+  mergeTinyRatio: 0.00046,
+  simplify: 3.35,
+  smoothPasses: 1,
+  protectLineArt: false,
+  flattenAlpha: false,
+  relaxGrid: true,
+};
+const productGroups = imageDataToVectorRegions(productLike, 64, productVectorSettings);
+const productPaths = [...productGroups.values()].map((group) => group.path).join("");
+const productPathCount = [...productGroups.values()].reduce((sum, group) => sum + group.regionCount, 0);
+const productCommandCount = countSvgPathCommands(productPaths);
+const productVisibleArea = [...productGroups.values()].reduce((sum, group) => sum + group.area, 0);
+const productCommandDensity = productCommandCount / Math.max(1, Math.sqrt(productVisibleArea));
+const productGridAlignedRatio = measureGridAlignedCoordinateRatio(productPaths);
+const productFractionalCoordinateRatio = measureFractionalCoordinateRatio(productPaths);
+
+if (!/[QC]/.test(productPaths)) failures.push("Expected product SVG to use smoothed curve commands.");
+if (productPathCount > 70) failures.push(`Expected product SVG to keep path count manageable, got ${productPathCount}.`);
+if (productCommandDensity > 8) failures.push(`Expected product SVG command density <= 8, got ${productCommandDensity.toFixed(2)}.`);
+if (productGridAlignedRatio > 0.62) failures.push(`Expected product SVG to reduce grid alignment, got ${productGridAlignedRatio.toFixed(2)}.`);
+if (productFractionalCoordinateRatio < 0.34) failures.push(`Expected product SVG to keep fractional coordinates, got ${productFractionalCoordinateRatio.toFixed(2)}.`);
+
 const result = {
   pathCount,
   commandCount,
@@ -110,6 +137,12 @@ const result = {
   photoCommandDensity: Math.round(photoCommandDensity * 100) / 100,
   photoTinyRegionCount,
   photoHasOpacityGroups,
+  productPathCount,
+  productCommandCount,
+  productVisibleArea,
+  productCommandDensity: Math.round(productCommandDensity * 100) / 100,
+  productGridAlignedRatio: Math.round(productGridAlignedRatio * 100) / 100,
+  productFractionalCoordinateRatio: Math.round(productFractionalCoordinateRatio * 100) / 100,
   pass: failures.length === 0,
   failures,
 };
@@ -172,6 +205,28 @@ function makePhotoLikeImageData(width, height) {
     const y = Math.round(92 + seededNoise(index, 7) * 110);
     const alpha = Math.round(96 + seededNoise(index, 8) * 60);
     setPixel(img, x, y, [240, 218, 196, alpha]);
+  }
+  return img;
+}
+
+function makeProductLikeImageData(width, height) {
+  const img = makeImageData(width, height);
+  roundRect(img, 58, 28, 162, 156, 12, [244, 226, 190, 255]);
+  rect(img, 70, 38, 12, 128, [22, 22, 22, 255]);
+  for (let y = 48; y < 156; y += 22) rect(img, 76, y, 12, 12, [255, 255, 255, 255]);
+  rect(img, 102, 58, 84, 10, [226, 210, 178, 255]);
+  rect(img, 102, 84, 92, 10, [226, 210, 178, 255]);
+  rect(img, 102, 110, 74, 10, [226, 210, 178, 255]);
+  rect(img, 102, 136, 82, 10, [226, 210, 178, 255]);
+  ellipse(img, 198, 48, 18, 18, [255, 255, 255, 190]);
+  for (let index = 0; index < 160; index += 1) {
+    const x = 72 + Math.round(seededNoise(index, 21) * 128);
+    const y = 42 + Math.round(seededNoise(index, 22) * 122);
+    const offset = (y * width + x) * 4;
+    const delta = Math.round((seededNoise(index, 23) - 0.5) * 10);
+    img.data[offset] = clamp(img.data[offset] + delta, 0, 255);
+    img.data[offset + 1] = clamp(img.data[offset + 1] + delta, 0, 255);
+    img.data[offset + 2] = clamp(img.data[offset + 2] + delta, 0, 255);
   }
   return img;
 }
@@ -381,10 +436,44 @@ function simplifyOrthogonalLoop(points) {
 function loopToPath(loop, vectorSettings) {
   if (loop.length < 4) return "";
   if (vectorSettings.mode === "precise" && loop.length > 4) return loopToCubicPath(loop, vectorSettings);
-  const start = loop[0];
+  const pathLoop = vectorSettings.relaxGrid && loop.length > 10 ? relaxGridAlignedLoop(loop, vectorSettings) : loop;
+  const start = pathLoop[0];
   let d = `M${start[0]} ${start[1]}`;
-  for (let index = 1; index < loop.length - 1; index += 1) d += `L${roundPathNumber(loop[index][0])} ${roundPathNumber(loop[index][1])}`;
+  if (pathLoop.length > 10) {
+    for (let index = 1; index < pathLoop.length - 2; index += 1) {
+      const point = pathLoop[index];
+      const next = pathLoop[index + 1];
+      const midX = roundPathNumber((point[0] + next[0]) / 2);
+      const midY = roundPathNumber((point[1] + next[1]) / 2);
+      d += `Q${roundPathNumber(point[0])} ${roundPathNumber(point[1])} ${midX} ${midY}`;
+    }
+  } else {
+    for (let index = 1; index < pathLoop.length - 1; index += 1) d += `L${roundPathNumber(pathLoop[index][0])} ${roundPathNumber(pathLoop[index][1])}`;
+  }
   return `${d}Z`;
+}
+
+function relaxGridAlignedLoop(loop, vectorSettings = {}) {
+  const closed = sameVectorPoint(loop[0], loop[loop.length - 1]);
+  const points = closed ? loop.slice(0, -1) : loop;
+  if (points.length < 8) return loop;
+  const strength = vectorSettings.protectLineArt ? 0.08 : 0.16;
+  const relaxed = points.map((point, index) => {
+    const prev = points[(index - 1 + points.length) % points.length];
+    const next = points[(index + 1) % points.length];
+    const prevDistance = Math.hypot(point[0] - prev[0], point[1] - prev[1]);
+    const nextDistance = Math.hypot(point[0] - next[0], point[1] - next[1]);
+    if (prevDistance > 20 || nextDistance > 20) return point;
+    const average = [(prev[0] + next[0]) / 2, (prev[1] + next[1]) / 2];
+    const corner = Math.abs((point[0] - prev[0]) * (next[1] - point[1]) - (point[1] - prev[1]) * (next[0] - point[0]));
+    const localStrength = corner > 10 ? strength * 0.55 : strength;
+    return [
+      point[0] * (1 - localStrength) + average[0] * localStrength,
+      point[1] * (1 - localStrength) + average[1] * localStrength,
+    ];
+  });
+  relaxed.push(relaxed[0]);
+  return relaxed;
 }
 
 function loopToCubicPath(loop, vectorSettings) {

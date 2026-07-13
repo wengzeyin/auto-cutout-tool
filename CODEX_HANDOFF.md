@@ -6,7 +6,7 @@ This file is for continuing the project from another Codex thread or device.
 
 - Repo: `wengzeyin/auto-cutout-tool`
 - Branch: `main`
-- Last confirmed sync: `2026-07-13`, local `main` matches `origin/main` at `Improve product matte routing`.
+- Last confirmed sync: `2026-07-13`, local `main` matches `origin/main` at `Relax product SVG grid alignment`.
 - Pushed commits through `Polish UI icons and motion`:
   - `8da0f03 Improve split QA and Windows runner portability`
   - `Refine result-first UI workbench`
@@ -25,6 +25,7 @@ This file is for continuing the project from another Codex thread or device.
   - `Add browser QA metric coverage and local model proxy`
   - `Add solid background fast cutout`
   - `Improve product matte routing`
+  - `Relax product SVG grid alignment`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -39,7 +40,7 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 ## Current Continuation Notes
 
 - The latest algorithm work has focused on making quality regressions measurable before changing more core behavior.
-- Current pushed head: `Improve product matte routing`.
+- Current pushed head: `Relax product SVG grid alignment`.
 - Safe next algorithm targets:
   - Improve real matte behavior for light illustration interiors beyond synthetic coverage.
   - Continue SVG quality work: path simplification, color-region merging, and fewer editable paths without blocky outlines.
@@ -145,6 +146,14 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - Added product-only smooth-edge matte retry logic: when product matte analysis sees high edge jaggedness or white-fringe risk, the app tries a cleaner/smoother product profile and adopts it only if edge quality improves without materially increasing light-region loss, line loss, semi-transparent core, white fringe, or alpha coverage loss.
 - Added decision coverage for smooth-edge retry/accept/reject paths in `qa/test-matte-refine.mjs`.
 - Full browser QA on `2026-07-13 15:54` passed with 15/15 rows, average score 4.79, and no baseline regressions.
+
+### Product SVG Grid Relaxation - Done
+
+- Added a product SVG `relaxGrid` path step that keeps the existing low-command quadratic path output but nudges long product outlines off integer pixel-grid coordinates.
+- Avoided switching product SVG to full precise cubic mode after QA comparison showed command-density regressions despite smoother paths.
+- Added product-vector regression coverage in `qa/test-svg-vector.mjs` for curve output, command density, grid alignment, and fractional coordinates.
+- Full browser QA on `2026-07-13 16:06` passed with 15/15 rows, average score 4.79, and no baseline regressions.
+- Baseline comparison showed product SVG command density stayed unchanged while `svgGridAlignedRatio` improved on all product rows: `05` 0.6560 -> 0.5045, `06` 0.6386 -> 0.4705, `09` 0.5704 -> 0.4239, `14` 0.5973 -> 0.4081.
 
 ## UI Pass Plan
 

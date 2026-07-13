@@ -675,7 +675,7 @@ function getPresetConfig(preset = "balanced") {
     product: {
       matte: { cleanupBoost: 1.15, smoothLimit: 3, preserveLight: false, preserveLine: false },
       detection: { minAreaFactor: 1.05, splitStrength: "conservative", largeBoxRiskRatio: 0.42 },
-      svg: { colorStep: 72, maxEdge: 420, minRegionRatio: 0.00022, simplify: 3.35, smoothPasses: 1, mergeTinyRatio: 0.00046, alphaThreshold: 72 },
+      svg: { colorStep: 72, maxEdge: 420, minRegionRatio: 0.00022, simplify: 3.35, smoothPasses: 1, mergeTinyRatio: 0.00046, alphaThreshold: 72, relaxGrid: true },
     },
     portraitHair: {
       matte: { cleanupBoost: 0.9, smoothLimit: 2, preserveLight: true, preserveLine: false },
@@ -6558,6 +6558,7 @@ function getVectorSettings() {
     alphaThreshold: manual
       ? (mode === "precise" ? 24 : 48)
       : (svg.alphaThreshold || 32),
+    relaxGrid: Boolean(svg.relaxGrid) || (manual && mode !== "fast"),
     protectLineArt: (Boolean(svg.protectLineArt) || Boolean(els.svgLineArt?.checked)) && (
       preset === "logoIcon" || preset === "illustration" || preset === "sticker" || preset === "multiSticker" || manual
     ),
@@ -6827,23 +6828,49 @@ function simplifyOrthogonalLoop(points) {
 function loopToPath(loop, vectorSettings = {}) {
   if (loop.length < 4) return "";
   if (vectorSettings.mode === "precise" && loop.length > 4) return loopToCubicPath(loop, vectorSettings);
-  const start = loop[0];
+  const pathLoop = vectorSettings.relaxGrid && loop.length > 10
+    ? relaxGridAlignedLoop(loop, vectorSettings)
+    : loop;
+  const start = pathLoop[0];
   let d = `M${start[0]} ${start[1]}`;
-  if (loop.length > 10) {
-    for (let index = 1; index < loop.length - 2; index += 1) {
-      const point = loop[index];
-      const next = loop[index + 1];
+  if (pathLoop.length > 10) {
+    for (let index = 1; index < pathLoop.length - 2; index += 1) {
+      const point = pathLoop[index];
+      const next = pathLoop[index + 1];
       const midX = roundPathNumber((point[0] + next[0]) / 2);
       const midY = roundPathNumber((point[1] + next[1]) / 2);
       d += `Q${roundPathNumber(point[0])} ${roundPathNumber(point[1])} ${midX} ${midY}`;
     }
   } else {
-    for (let index = 1; index < loop.length - 1; index += 1) {
-      const point = loop[index];
+    for (let index = 1; index < pathLoop.length - 1; index += 1) {
+      const point = pathLoop[index];
       d += `L${roundPathNumber(point[0])} ${roundPathNumber(point[1])}`;
     }
   }
   return `${d}Z`;
+}
+
+function relaxGridAlignedLoop(loop, vectorSettings = {}) {
+  const closed = sameVectorPoint(loop[0], loop[loop.length - 1]);
+  const points = closed ? loop.slice(0, -1) : loop;
+  if (points.length < 8) return loop;
+  const strength = vectorSettings.protectLineArt ? 0.08 : 0.16;
+  const relaxed = points.map((point, index) => {
+    const prev = points[(index - 1 + points.length) % points.length];
+    const next = points[(index + 1) % points.length];
+    const prevDistance = Math.hypot(point[0] - prev[0], point[1] - prev[1]);
+    const nextDistance = Math.hypot(point[0] - next[0], point[1] - next[1]);
+    if (prevDistance > 20 || nextDistance > 20) return point;
+    const average = [(prev[0] + next[0]) / 2, (prev[1] + next[1]) / 2];
+    const corner = Math.abs((point[0] - prev[0]) * (next[1] - point[1]) - (point[1] - prev[1]) * (next[0] - point[0]));
+    const localStrength = corner > 10 ? strength * 0.55 : strength;
+    return [
+      point[0] * (1 - localStrength) + average[0] * localStrength,
+      point[1] * (1 - localStrength) + average[1] * localStrength,
+    ];
+  });
+  relaxed.push(relaxed[0]);
+  return relaxed;
 }
 
 function loopToCubicPath(loop, vectorSettings = {}) {

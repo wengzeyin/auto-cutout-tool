@@ -1,6 +1,6 @@
 # QA Run Summary
 
-Run time: 2026-07-13 15:54 Asia/Shanghai
+Run time: 2026-07-13 16:06 Asia/Shanghai
 
 Mode: mixed QA scenarios
 Export format: PNG / WebP / SVG validation
@@ -19,7 +19,7 @@ Export scale: 1x baseline with size checks
 - Line art risk: 0
 - Light region risk: 0
 - Semi-transparent core risk: 0
-- ZIP: `qa/run-output/cutout-batch-20260713-1554.zip`
+- ZIP: `qa/run-output/cutout-batch-20260713-1606.zip`
 - Raw report: `qa/run-output/qa-report.latest.json`
 - Browser QA metric coverage: SVG 7 / 7 rows, multi-element small metrics 4 / 4 rows
 
@@ -53,6 +53,7 @@ Export scale: 1x baseline with size checks
 - Reduced light-solid flood tolerance so beige/light subjects are no longer swallowed into the white background mask.
 - Added complex-background product image-type routing for low-complexity colored-background product graphics, plus regression coverage that keeps flat illustrations from being misclassified.
 - Added product-only smooth-edge matte retry: high-jaggedness product mattes can be refined with cleaner edge settings, but the result is accepted only when light regions, line art, core opacity, white fringe, and coverage stay stable.
+- Added product SVG grid relaxation: product SVG command density stayed unchanged, while product `svgGridAlignedRatio` improved across all product QA rows (`05` 0.6560 -> 0.5045, `06` 0.6386 -> 0.4705, `09` 0.5704 -> 0.4239, `14` 0.5973 -> 0.4081).
 - QA comparison against the previous baseline passed with no regressions in score, component count, large-box risk, small-element risk, matte, or SVG metrics.
 - Current algorithmic limiting cases remain: photo-like semi-transparent core on curly/short fur and complex-background person, product edge jaggedness, and complex-background product light-region loss.
 
