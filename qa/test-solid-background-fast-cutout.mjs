@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { createWriteStream } from "node:fs";
+import { createWriteStream, existsSync, readdirSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { spawn } from "node:child_process";
@@ -15,7 +15,9 @@ const port = Number(process.env.TEST_SOLID_BG_PORT || await findFreePort());
 const baseUrl = `http://localhost:${port}`;
 const token = `solid-bg-${process.pid}-${Date.now()}`;
 const nodeBin = process.env.NODE_BINARY || (process.platform === "win32" ? "node" : process.execPath);
-const nodeModules = process.env.NODE_PATH || "/Users/wzy/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules";
+const homeDir = process.env.USERPROFILE || process.env.HOME || "";
+const nodeModules = process.env.NODE_PATH
+  || path.join(homeDir, ".cache", "codex-runtimes", "codex-primary-runtime", "dependencies", "node", "node_modules");
 const require = createRequire(import.meta.url);
 const { chromium } = requireFromNodePath("playwright");
 
@@ -26,7 +28,7 @@ let browser;
 
 try {
   await waitForServer(server);
-  browser = await chromium.launch({ headless: process.env.HEADLESS !== "0" });
+  browser = await chromium.launch(getChromiumLaunchOptions());
   const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
   page.on("console", (message) => consoleMessages.push(`${message.type()}: ${message.text()}`));
   page.on("pageerror", (error) => consoleMessages.push(`pageerror: ${error.message}`));
@@ -266,10 +268,50 @@ function findFreePort() {
 }
 
 function requireFromNodePath(name) {
+  const candidates = [
+    name,
+    path.join(nodeModules, name),
+    path.join(nodeModules, ".pnpm", "node_modules", name),
+    findPnpmPackagePath(name),
+  ].filter(Boolean);
+  let lastError;
+  for (const candidate of candidates) {
+    try {
+      return require(candidate);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+
+function getChromiumLaunchOptions() {
+  const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || findSystemChromium();
+  return {
+    headless: process.env.HEADLESS !== "0",
+    ...(executablePath ? { executablePath } : {}),
+  };
+}
+
+function findSystemChromium() {
+  if (process.platform !== "win32") return null;
+  const candidates = [
+    "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+    "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+    "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) || null;
+}
+
+function findPnpmPackagePath(name) {
   try {
-    return require(name);
+    const pnpmRoot = path.join(nodeModules, ".pnpm");
+    const packagePrefix = name.startsWith("@") ? name.replace("/", "+") : name;
+    const entry = readdirSync(pnpmRoot).find((item) => item === packagePrefix || item.startsWith(`${packagePrefix}@`));
+    return entry ? path.join(pnpmRoot, entry, "node_modules", name) : null;
   } catch {
-    return require(path.join(nodeModules, name));
+    return null;
   }
 }
 

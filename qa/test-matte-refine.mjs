@@ -80,6 +80,14 @@ function protectLightRegion(red, green, blue, metrics, settings) {
   return notWhiteBackground && hasColorBias && metrics.lightness >= 168 && metrics.lightness < 246 && metrics.saturation > 0.045;
 }
 
+function protectNeutralInteriorLightRegion(metrics, settings) {
+  if (!settings.preserveLightRegions) return false;
+  const illustrationLike = settings.imageType === "illustration" || settings.imageType === "sticker" || settings.imageType === "line-art";
+  if (!illustrationLike) return false;
+  if (metrics.lightness < 184 || metrics.lightness >= 236) return false;
+  return metrics.saturation <= 0.075;
+}
+
 function protectProductLightRegion(red, green, blue, metrics, settings) {
   if (settings.imageType !== "product") return false;
   if (metrics.lightness < 186 || metrics.lightness > 252) return false;
@@ -110,6 +118,30 @@ function isInteriorLightDetail(data, x, y, radius, threshold) {
       if (px < 0 || px >= width || (px === x && py === y)) continue;
       const alpha = data[(py * width + px) * 4 + 3];
       if (alpha < threshold) continue;
+      total += 1;
+      if (ox < 0) buckets.left += 1;
+      if (ox > 0) buckets.right += 1;
+      if (oy < 0) buckets.up += 1;
+      if (oy > 0) buckets.down += 1;
+    }
+  }
+  return total >= 16 && buckets.left >= 3 && buckets.right >= 3 && buckets.up >= 3 && buckets.down >= 3;
+}
+
+function isInteriorLightColorSupported(data, x, y, radius, alphaThreshold, lightnessThreshold) {
+  const buckets = { left: 0, right: 0, up: 0, down: 0 };
+  let total = 0;
+  for (let oy = -radius; oy <= radius; oy += 1) {
+    const py = y + oy;
+    if (py < 0 || py >= height) continue;
+    for (let ox = -radius; ox <= radius; ox += 1) {
+      const px = x + ox;
+      if (px < 0 || px >= width || (px === x && py === y)) continue;
+      const offset = (py * width + px) * 4;
+      const alpha = data[offset + 3];
+      if (alpha < alphaThreshold) continue;
+      const metrics = colorMetrics(data[offset], data[offset + 1], data[offset + 2]);
+      if (metrics.lightness < lightnessThreshold) continue;
       total += 1;
       if (ox < 0) buckets.left += 1;
       if (ox > 0) buckets.right += 1;
@@ -800,12 +832,16 @@ function restoreIllustrationDetailsData(cutout, original, settings) {
     const protectedPaleInterior = settings.preserveLightRegions
       && metrics.lightness >= 224
       && metrics.lightness < 248
+      && (metrics.saturation > 0.035 || metrics.lightness >= 236)
       && isOriginalEnclosedLightDetail(original.data, x, y, 7);
+    const protectedNeutralInterior = protectNeutralInteriorLightRegion(metrics, settings)
+      && isOriginalEnclosedLightDetail(original.data, x, y, 7)
+      && isInteriorLightColorSupported(cutout.data, x, y, 4, 128, 168);
     const protectedProductLightFill = protectProductLightRegion(red, green, blue, metrics, settings)
       && hasDirectionalAlphaSupport(cutout.data, x, y, 5, 72);
     if (nearWhite && !protectedInteriorWhite) continue;
 
-    if (alpha > 18 && (darkStroke || coloredFill || protectedLightFill || protectedWarmOrCool || protectedInteriorWhite || protectedPaleInterior || protectedProductLightFill)) {
+    if (alpha > 18 && (darkStroke || coloredFill || protectedLightFill || protectedWarmOrCool || protectedInteriorWhite || protectedPaleInterior || protectedNeutralInterior || protectedProductLightFill)) {
       cutout.data[offset] = red;
       cutout.data[offset + 1] = green;
       cutout.data[offset + 2] = blue;
@@ -858,6 +894,12 @@ function restoreIllustrationDetailsData(cutout, original, settings) {
       cutout.data[offset + 1] = green;
       cutout.data[offset + 2] = blue;
       cutout.data[offset + 3] = Math.max(alpha, protectedInteriorWhite ? 210 : 150);
+      restoredPixels += 1;
+    } else if (protectedNeutralInterior && alpha < 126 && hasOpaqueNeighbor(cutout.data, x, y, 5, 72)) {
+      cutout.data[offset] = red;
+      cutout.data[offset + 1] = green;
+      cutout.data[offset + 2] = blue;
+      cutout.data[offset + 3] = Math.max(alpha, hasDirectionalAlphaSupport(cutout.data, x, y, 5, 96) ? 172 : 138);
       restoredPixels += 1;
     } else if (protectedProductLightFill && alpha < 160) {
       cutout.data[offset] = red;
@@ -982,6 +1024,8 @@ const warmFlame = [];
 const whiteFlameCore = [];
 const lineArt = [];
 const interiorWhite = [];
+const neutralInteriorShadow = [];
+const neutralBackgroundPatch = [];
 const backgroundResidue = [];
 const whiteFringe = [];
 
@@ -993,6 +1037,10 @@ fillRect(original, 68, 62, 73, 65, [252, 252, 250, 255], interiorWhite);
 fillRect(original, 88, 62, 93, 65, [252, 252, 250, 255], interiorWhite);
 fillRect(cutout, 68, 62, 73, 65, [252, 252, 250, 0]);
 fillRect(cutout, 88, 62, 93, 65, [252, 252, 250, 0]);
+fillRect(original, 94, 72, 101, 78, [226, 226, 222, 255], neutralInteriorShadow);
+fillRect(cutout, 94, 72, 101, 78, [226, 226, 222, 0]);
+fillRect(original, 116, 66, 120, 76, [226, 226, 222, 255], neutralBackgroundPatch);
+fillRect(cutout, 116, 66, 120, 76, [226, 226, 222, 0]);
 for (let y = 42; y <= 94; y += 1) {
   for (let x = 45; x <= 115; x += 1) {
     const edge = Math.abs(((x - 80) ** 2) / (34 ** 2) + ((y - 68) ** 2) / (26 ** 2) - 1);
@@ -1277,6 +1325,8 @@ const metrics = {
   warmAlpha: averageAlpha(restored.image, warmFlame),
   whiteFlameCoreAlpha: averageAlpha(restored.image, whiteFlameCore),
   interiorWhiteAlpha: averageAlpha(restored.image, interiorWhite),
+  neutralInteriorShadowAlpha: averageAlpha(restored.image, neutralInteriorShadow),
+  neutralBackgroundPatchAlpha: averageAlpha(restored.image, neutralBackgroundPatch),
   whiteFringeAlpha: averageAlpha(restored.image, whiteFringe),
   whiteFringeLightness: averageLightness(restored.image, whiteFringe),
   jaggedBefore: edgeJaggedness(jaggedBefore),
@@ -1362,6 +1412,8 @@ if (metrics.lineCoverage < 0.82) failures.push(`line art coverage too low: ${(me
 if (metrics.warmAlpha < 150) failures.push(`warm detail not restored: ${metrics.warmAlpha.toFixed(1)}`);
 if (metrics.whiteFlameCoreAlpha < 175) failures.push(`enclosed white flame core not restored: ${metrics.whiteFlameCoreAlpha.toFixed(1)}`);
 if (metrics.interiorWhiteAlpha < 180) failures.push(`interior white detail not restored: ${metrics.interiorWhiteAlpha.toFixed(1)}`);
+if (metrics.neutralInteriorShadowAlpha < 130) failures.push(`neutral interior light shadow not restored: ${metrics.neutralInteriorShadowAlpha.toFixed(1)}`);
+if (metrics.neutralBackgroundPatchAlpha > 55) failures.push(`neutral background patch was over-restored: ${metrics.neutralBackgroundPatchAlpha.toFixed(1)}`);
 if (metrics.whiteFringeAlpha > 42 && metrics.whiteFringeLightness > 220) failures.push(`white fringe still visible: alpha ${metrics.whiteFringeAlpha.toFixed(1)}, lightness ${metrics.whiteFringeLightness.toFixed(1)}`);
 if (metrics.jaggedAfter >= metrics.jaggedBefore * 0.7) failures.push(`jagged edge not softened: ${metrics.jaggedBefore.toFixed(3)} -> ${metrics.jaggedAfter.toFixed(3)}`);
 if (metrics.guidedAfter <= metrics.guidedBefore + 10) failures.push(`guided edge alpha did not move toward similar solid neighbor: ${metrics.guidedBefore.toFixed(1)} -> ${metrics.guidedAfter.toFixed(1)}`);

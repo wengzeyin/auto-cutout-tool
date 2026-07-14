@@ -2490,11 +2490,15 @@ function restoreIllustrationDetails(cutoutCanvas, originalCanvas, settings) {
     const protectedPaleInterior = settings.preserveLightRegions
       && metrics.lightness >= 224
       && metrics.lightness < 248
+      && (metrics.saturation > 0.035 || metrics.lightness >= 236)
       && isOriginalEnclosedLightDetail(original.data, width, height, x, y, 7);
+    const protectedNeutralInterior = protectNeutralInteriorLightRegion(metrics, settings)
+      && isOriginalEnclosedLightDetail(original.data, width, height, x, y, 7)
+      && isInteriorLightColorSupported(result.data, width, height, x, y, 4, 128, 168);
     const protectedProductLightFill = protectProductLightRegion(red, green, blue, metrics, settings)
       && hasDirectionalAlphaSupport(result.data, width, height, x, y, 5, 72);
 
-    if (alpha > 18 && (darkStroke || coloredFill || protectedLightFill || protectedWarmOrCool || protectedInteriorWhite || protectedPaleInterior || protectedProductLightFill)) {
+    if (alpha > 18 && (darkStroke || coloredFill || protectedLightFill || protectedWarmOrCool || protectedInteriorWhite || protectedPaleInterior || protectedNeutralInterior || protectedProductLightFill)) {
       result.data[offset] = red;
       result.data[offset + 1] = green;
       result.data[offset + 2] = blue;
@@ -2547,6 +2551,12 @@ function restoreIllustrationDetails(cutoutCanvas, originalCanvas, settings) {
       result.data[offset + 1] = green;
       result.data[offset + 2] = blue;
       result.data[offset + 3] = Math.max(alpha, protectedInteriorWhite ? 210 : 150);
+      restoredPixels += 1;
+    } else if (protectedNeutralInterior && alpha < 126 && hasOpaqueNeighbor(result.data, width, height, x, y, 5, 72)) {
+      result.data[offset] = red;
+      result.data[offset + 1] = green;
+      result.data[offset + 2] = blue;
+      result.data[offset + 3] = Math.max(alpha, hasDirectionalAlphaSupport(result.data, width, height, x, y, 5, 96) ? 172 : 138);
       restoredPixels += 1;
     } else if (protectedProductLightFill && alpha < 160) {
       result.data[offset] = red;
@@ -2632,6 +2642,14 @@ function protectLightRegion(red, green, blue, metrics, settings) {
   return notWhiteBackground && hasColorBias && metrics.lightness >= 168 && metrics.lightness < 246 && metrics.saturation > 0.045;
 }
 
+function protectNeutralInteriorLightRegion(metrics, settings) {
+  if (!settings.preserveLightRegions) return false;
+  const illustrationLike = settings.imageType === "illustration" || settings.imageType === "sticker" || settings.imageType === "line-art";
+  if (!illustrationLike) return false;
+  if (metrics.lightness < 184 || metrics.lightness >= 236) return false;
+  return metrics.saturation <= 0.075;
+}
+
 function protectProductLightRegion(red, green, blue, metrics, settings) {
   if (settings.imageType !== "product") return false;
   if (metrics.lightness < 186 || metrics.lightness > 252) return false;
@@ -2671,6 +2689,30 @@ function isInteriorLightDetail(data, width, height, x, y, radius, threshold) {
       if (px < 0 || px >= width || (px === x && py === y)) continue;
       const alpha = data[(py * width + px) * 4 + 3];
       if (alpha < threshold) continue;
+      total += 1;
+      if (ox < 0) buckets.left += 1;
+      if (ox > 0) buckets.right += 1;
+      if (oy < 0) buckets.up += 1;
+      if (oy > 0) buckets.down += 1;
+    }
+  }
+  return total >= 16 && buckets.left >= 3 && buckets.right >= 3 && buckets.up >= 3 && buckets.down >= 3;
+}
+
+function isInteriorLightColorSupported(data, width, height, x, y, radius, alphaThreshold, lightnessThreshold) {
+  const buckets = { left: 0, right: 0, up: 0, down: 0 };
+  let total = 0;
+  for (let oy = -radius; oy <= radius; oy += 1) {
+    const py = y + oy;
+    if (py < 0 || py >= height) continue;
+    for (let ox = -radius; ox <= radius; ox += 1) {
+      const px = x + ox;
+      if (px < 0 || px >= width || (px === x && py === y)) continue;
+      const offset = (py * width + px) * 4;
+      const alpha = data[offset + 3];
+      if (alpha < alphaThreshold) continue;
+      const metrics = colorMetrics(data[offset], data[offset + 1], data[offset + 2]);
+      if (metrics.lightness < lightnessThreshold) continue;
       total += 1;
       if (ox < 0) buckets.left += 1;
       if (ox > 0) buckets.right += 1;

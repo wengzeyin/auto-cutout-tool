@@ -38,6 +38,7 @@ This file is for continuing the project from another Codex thread or device.
   - `Tune photo dense core neighborhood`
   - `Mask source-connected dark exteriors`
   - `Merge SVG edge color bands`
+  - `Protect neutral illustration interiors`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -57,13 +58,14 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
   - No new algorithm code was started after the SVG edge-band QA note; this update is intentionally a handoff-only checkpoint so the next computer can continue from a clean state.
   - If continuing in another Codex task or on another device, start by reading this file, then run `git pull` on `main`.
   - The next useful work should stay algorithm/QA-focused rather than UI-focused unless the product direction changes.
-  - Recommended next stage: improve light illustration interior matte protection with regression coverage, then run the lightweight QA list below before committing.
-  - Secondary targets: actual AI timeout/cancellation behavior for large images, more SVG path simplification/color-region merging, and real sticker-pack split tuning.
+  - Completed next stage after this note: neutral light illustration interior matte protection with regression coverage.
+  - Recommended next stage: continue SVG path simplification/color-region merging, or tune real sticker-pack split behavior against more representative assets.
+  - Secondary target: actual AI cancellation behavior for large images beyond the existing timeout guard.
 - The latest algorithm work has focused on making quality regressions measurable before changing more core behavior.
 - Current pushed head before this handoff note: `fdafacb Record SVG edge band QA`; latest local validation ran the full 15-image browser QA without changing the 15-image baseline score.
 - Safe next algorithm targets:
   - Continue performance work around actual AI fallback timeouts, cancellation, and large-image scan scheduling.
-  - Improve real matte behavior for light illustration interiors beyond synthetic coverage.
+  - Improve real matte behavior for light illustration interiors beyond synthetic coverage, now starting from the neutral-interior guard added on 2026-07-15.
   - Continue SVG quality work: path simplification, color-region merging, and fewer editable paths without blocky outlines.
   - Continue tuning multi-element splitting for real sticker packs: avoid both missed tiny assets and over-splitting body parts.
 - Before changing algorithm thresholds, run the lightweight QA list at the bottom of this file. For larger behavior changes, run browser QA and compare against the previous report.
@@ -97,6 +99,15 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - Added SVG regression coverage in `qa/test-svg-vector.mjs`: `edgeBandGreenGroups` is 1, `edgeBandPathCount` is 5, and protected dark line-art area remains 711.
 - Lightweight regression passed across SVG, matte, image-type, multi-split, report validation, runner health, summary risk, and solid-background fast-cutout tests.
 - Full browser QA on `2026-07-13 18:49` passed with 15/15 rows, average score 4.79, 0 release blockers, and no baseline regressions against `cutout-batch-20260713-1836.zip`.
+
+### Neutral Illustration Interior Protection - Done
+
+- Added a conservative neutral-light interior matte recovery path for illustration/sticker/line-art images.
+- Low-saturation light gray/cream interior details now restore only when the original image shows an enclosed detail and the current matte has surrounding light subject support. This helps preserve pale face shadows and neutral illustration interiors without bridging nearby separate elements.
+- Tightened the older pale-interior restoration so low-saturation pale regions are handled by the stricter neutral-interior rule instead of being restored merely because two nearby elements surround them.
+- Added matte regression coverage in `qa/test-matte-refine.mjs`: `neutralInteriorShadowAlpha` restores to `172`, while the nearby neutral background patch stays a soft edge at `37.45` instead of becoming solid.
+- Fixed browser QA portability for device migration: `qa/test-ai-timeout-guard.mjs` and `qa/test-solid-background-fast-cutout.mjs` no longer default to the old `/Users/wzy/...` runtime path, can resolve pnpm-packed Playwright, and can use installed Chrome/Edge when Playwright's bundled browser is missing.
+- Validation on `2026-07-15`: syntax checks passed for updated scripts; matte, image-type, multi-split, SVG vector, AI timeout guard, report validation, report compare, runner health, summary risk, report metric coverage, and solid-background fast-cutout QA all passed locally.
 
 ## Already Implemented Before UI Pass
 
