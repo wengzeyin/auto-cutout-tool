@@ -6,7 +6,7 @@ This file is for continuing the project from another Codex thread or device.
 
 - Repo: `wengzeyin/auto-cutout-tool`
 - Branch: `main`
-- Last confirmed sync: `2026-07-13`, local `main` includes SVG edge color-band merging and full browser QA validation.
+- Last confirmed sync: `2026-07-15`, local `main` is clean and matches GitHub before this handoff note.
 - Pushed commits through `Polish UI icons and motion`:
   - `8da0f03 Improve split QA and Windows runner portability`
   - `Refine result-first UI workbench`
@@ -51,8 +51,16 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 
 ## Current Continuation Notes
 
+- 2026-07-15 device handoff note:
+  - Current branch: `main`.
+  - Current GitHub head before this note: `fdafacb Record SVG edge band QA`.
+  - No new algorithm code was started after the SVG edge-band QA note; this update is intentionally a handoff-only checkpoint so the next computer can continue from a clean state.
+  - If continuing in another Codex task or on another device, start by reading this file, then run `git pull` on `main`.
+  - The next useful work should stay algorithm/QA-focused rather than UI-focused unless the product direction changes.
+  - Recommended next stage: improve light illustration interior matte protection with regression coverage, then run the lightweight QA list below before committing.
+  - Secondary targets: actual AI timeout/cancellation behavior for large images, more SVG path simplification/color-region merging, and real sticker-pack split tuning.
 - The latest algorithm work has focused on making quality regressions measurable before changing more core behavior.
-- Current pushed head before this patch: `Merge SVG edge color bands`; latest local validation ran the full 15-image browser QA without changing the 15-image baseline score.
+- Current pushed head before this handoff note: `fdafacb Record SVG edge band QA`; latest local validation ran the full 15-image browser QA without changing the 15-image baseline score.
 - Safe next algorithm targets:
   - Continue performance work around actual AI fallback timeouts, cancellation, and large-image scan scheduling.
   - Improve real matte behavior for light illustration interiors beyond synthetic coverage.
