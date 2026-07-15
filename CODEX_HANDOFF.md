@@ -44,6 +44,7 @@ This file is for continuing the project from another Codex thread or device.
   - `Normalize directional photo cores`
   - `Vendor local ZIP for offline QA`
   - `Merge SVG flat shade patches`
+  - `Abort AI timeout and cancel tasks`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -69,8 +70,8 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
   - Completed next photo matte stage after this note: directionally supported semi-transparent photo cores now normalize without hardening isolated hair strands.
   - Completed QA stability stage after this note: removed the external JSZip CDN dependency that blocked app initialization in restricted/offline browser QA, and restored the AI-timeout and solid-background browser guard tests.
   - Completed next SVG stage after this note: low-contrast flat shade patches merge into nearby same-hue fills when line art remains protected.
+  - Completed next AI control stage after this note: timeout and manual cancel now abort the active AI background-removal task instead of only resetting UI state.
   - Recommended next stage: tune real sticker-pack split behavior against more representative assets, or continue SVG path simplification at the curve/command-count layer.
-  - Secondary target: actual AI cancellation behavior for large images beyond the existing timeout guard.
 - The latest algorithm work has focused on making quality regressions measurable before changing more core behavior.
 - Current pushed head before this handoff note: `fdafacb Record SVG edge band QA`; latest local validation ran the full 15-image browser QA without changing the 15-image baseline score.
 - Safe next algorithm targets:
@@ -161,6 +162,15 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - The merge is gated by area, density, color distance, dominant same-hue boundary contact, and line-art protection.
 - Added SVG regression coverage in `qa/test-svg-vector.mjs`: `flatShadePathCount` is `5`, `flatShadeGreenGroups` stays at `2` or lower, and protected dark line-art area remains `920`.
 - Validation on `2026-07-15`: syntax checks passed; matte, image-type, multi-split, SVG vector, local ZIP, report validation, report compare, runner health, summary risk, report metric coverage, AI timeout guard, and solid-background fast-cutout QA all passed locally.
+
+### AI Timeout and Cancel Abort - Done
+
+- Added an active `AbortController` for AI background removal.
+- `runAiBackgroundRemoval()` now passes `signal` into the background-removal call, and timeout cleanup aborts the active task.
+- Manual cancel now aborts the active AI task as well as resetting UI state and queue state.
+- Stale/canceled task errors are no longer logged as current processing errors after the token has changed.
+- Extended `qa/test-ai-timeout-guard.mjs`: timeout recovery now asserts `aiAbortObserved: true`, and a second manual-cancel scenario verifies the process button re-enables, cancel hides, queue shows canceled, and the underlying task aborts.
+- Validation on `2026-07-15`: AI timeout/cancel guard passed; matte, image-type, multi-split, SVG vector, local ZIP, solid-background fast-cutout, report validation, report compare, runner health, summary risk, and report metric coverage QA all passed locally.
 
 ## Already Implemented Before UI Pass
 

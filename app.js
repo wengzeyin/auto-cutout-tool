@@ -105,6 +105,7 @@ const state = {
   refineTimer: 0,
   refineWorker: null,
   refineJobId: 0,
+  aiAbortController: null,
   alphaNormalized: false,
   imageType: "unknown",
   matteWarnings: [],
@@ -1346,6 +1347,8 @@ function setUploadFeedback(message, tone = "") {
 
 function cancelProcessing() {
   if (!state.processing) return;
+  abortCurrentAiTask();
+  state.aiAbortController = null;
   state.processingToken += 1;
   state.processing = false;
   setBusy(false);
@@ -1364,6 +1367,7 @@ async function processImage(options = {}) {
   if (!state.file || state.processing) return;
   const item = state.currentItem;
   const token = ++state.processingToken;
+  state.aiAbortController = null;
   state.processing = true;
   setBusy(true, options.message || "首次处理会下载约几十 MB 的模型，请稍等...");
   if (item && Math.max(item.originalWidth || 0, item.originalHeight || 0) > 3000) {
@@ -1420,8 +1424,8 @@ async function processImage(options = {}) {
       renderQueue();
     }
   } catch (error) {
-    console.error(error);
     if (token !== state.processingToken || item !== state.currentItem) return;
+    console.error(error);
     if (item) {
       item.status = "error";
       item.error = error;
@@ -1431,6 +1435,7 @@ async function processImage(options = {}) {
     setError(`处理失败：${error?.message || "请检查网络或换一张图片再试"}`);
   } finally {
     if (token === state.processingToken) {
+      state.aiAbortController = null;
       state.processing = false;
       setBusy(false);
       if (state.cutoutBlob) setProgress(100, "完成");
@@ -1450,10 +1455,13 @@ function getBackgroundRemovalResourceConfig() {
 
 async function runAiBackgroundRemoval(file, item) {
   const timeoutMs = getAiTimeoutMs(item);
+  const abortController = new AbortController();
+  state.aiAbortController = abortController;
   const options = {
     ...getBackgroundRemovalResourceConfig(),
     model: els.modelSelect.value,
     device: "cpu",
+    signal: abortController.signal,
     output: { format: "image/png", type: "foreground" },
     progress: (key, current, total) => {
       if (total) {
@@ -1464,7 +1472,7 @@ async function runAiBackgroundRemoval(file, item) {
     },
   };
   const aiTask = window.__cutoutDebug?.simulateAiHang
-    ? new Promise(() => {})
+    ? createDebugHangingAiTask(abortController.signal)
     : removeBackground(file, options);
   return promiseWithTimeout(
     aiTask,
@@ -1482,11 +1490,34 @@ function getAiTimeoutMs(item) {
   return DEFAULT_AI_TIMEOUT_MS;
 }
 
-function promiseWithTimeout(promise, timeoutMs, message) {
+function promiseWithTimeout(promise, timeoutMs, message, onTimeout) {
   let timer = 0;
   return new Promise((resolve, reject) => {
-    timer = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+    timer = window.setTimeout(() => {
+      try {
+        onTimeout?.();
+        abortCurrentAiTask();
+      } finally {
+        reject(new Error(message));
+      }
+    }, timeoutMs);
     Promise.resolve(promise).then(resolve, reject).finally(() => window.clearTimeout(timer));
+  });
+}
+
+function abortCurrentAiTask() {
+  if (!state.aiAbortController || state.aiAbortController.signal.aborted) return;
+  state.aiAbortController.abort();
+}
+
+function createDebugHangingAiTask(signal) {
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      if (window.__cutoutDebug) window.__cutoutDebug.aiAbortObserved = true;
+      reject(new DOMException("AI task aborted", "AbortError"));
+    };
+    if (signal.aborted) abort();
+    else signal.addEventListener("abort", abort, { once: true });
   });
 }
 

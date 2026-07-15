@@ -51,6 +51,7 @@ try {
     cancelHidden: document.querySelector("#cancelBtn")?.hidden || false,
     progressHidden: document.querySelector("#progressWrap")?.hidden || false,
     queueMessage: document.querySelector(".queue-item .queue-copy span")?.textContent || "",
+    aiAbortObserved: Boolean(window.__cutoutDebug?.aiAbortObserved),
   }));
   const failures = [];
   if (elapsedMs > 4500) failures.push(`Expected timeout guard to recover quickly, got ${elapsedMs}ms.`);
@@ -58,7 +59,14 @@ try {
   if (state.processDisabled) failures.push("Process button should be re-enabled after timeout.");
   if (!state.cancelHidden) failures.push("Cancel button should hide after timeout cleanup.");
   if (!state.progressHidden) failures.push("Progress should hide when no cutout was produced.");
+  if (!state.aiAbortObserved) failures.push("Timeout should abort the underlying AI task.");
   if (!/处理失败/.test(state.queueMessage)) failures.push(`Queue should show failure, got "${state.queueMessage}".`);
+  const cancelState = await runManualCancelCase(page);
+  if (!cancelState.aiAbortObserved) failures.push("Manual cancel should abort the underlying AI task.");
+  if (cancelState.processDisabled) failures.push("Process button should be re-enabled after manual cancel.");
+  if (!cancelState.cancelHidden) failures.push("Cancel button should hide after manual cancel.");
+  if (!/宸插彇娑|已取消/.test(cancelState.queueMessage)) failures.push(`Queue should show cancel state, got "${cancelState.queueMessage}".`);
+
   const blockingConsole = consoleMessages.filter((message) => /pageerror:|willReadFrequently/.test(message));
   if (blockingConsole.length) failures.push(`Unexpected console failure: ${blockingConsole.join(" | ")}`);
 
@@ -66,6 +74,7 @@ try {
     pass: failures.length === 0,
     elapsedMs,
     state,
+    cancelState,
     failures,
     consoleMessages: consoleMessages.slice(-40),
   };
@@ -75,6 +84,26 @@ try {
   if (browser) await browser.close().catch(() => {});
   server.kill();
   await waitForExit(server, 3000).catch(() => {});
+}
+
+async function runManualCancelCase(page) {
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
+  await page.locator("#fileInput").waitFor({ state: "attached", timeout: 30_000 });
+  await page.evaluate(() => {
+    window.__cutoutDebug = { simulateAiHang: true, aiTimeoutMs: 30_000 };
+  });
+  await uploadNonSolidImage(page);
+  await page.waitForFunction(() => document.querySelectorAll(".queue-item").length === 1, null, { timeout: 10_000 });
+  await page.locator("#processBtn").click({ timeout: 10_000 });
+  await page.locator("#cancelBtn").waitFor({ state: "visible", timeout: 5_000 });
+  await page.locator("#cancelBtn").click({ timeout: 5_000 });
+  await page.waitForFunction(() => document.querySelector("#cancelBtn")?.hidden, null, { timeout: 5_000 });
+  return page.evaluate(() => ({
+    processDisabled: document.querySelector("#processBtn")?.disabled || false,
+    cancelHidden: document.querySelector("#cancelBtn")?.hidden || false,
+    queueMessage: document.querySelector(".queue-item .queue-copy span")?.textContent || "",
+    aiAbortObserved: Boolean(window.__cutoutDebug?.aiAbortObserved),
+  }));
 }
 
 async function uploadNonSolidImage(page) {
