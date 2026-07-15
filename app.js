@@ -2136,10 +2136,12 @@ function refineCutoutAlpha(sourceCanvas, settings) {
   normalizeDenseCoreAlpha(imageData, settings);
   guidedSmoothEdgeAlpha(imageData, settings);
   suppressWhiteFringeAlpha(imageData, settings);
+  restoreTransparentMaterialHighlights(imageData, settings);
   antiAliasHardEdges(imageData, settings);
   polishProductDiagonalEdges(imageData, settings);
   normalizePostEdgeCoreAlpha(imageData, settings);
   suppressWhiteFringeAlpha(imageData, settings);
+  restoreTransparentMaterialHighlights(imageData, settings);
   suppressDarkBackgroundFringeAlpha(imageData, settings);
   ctx.putImageData(imageData, 0, 0);
   return { canvas, alphaNormalized };
@@ -2231,6 +2233,45 @@ function suppressWhiteFringeAlpha(imageData, settings = {}) {
       if (lowAlphaIllustrationFringe || fringeStrength > 0) {
         data[offset + 3] = lowAlphaIllustrationFringe ? 0 : Math.round(alpha * fringeStrength * preserveMultiplier);
       }
+    }
+  }
+  return imageData;
+}
+
+function restoreTransparentMaterialHighlights(imageData, settings = {}) {
+  if (settings.imageType !== "transparentMaterial") return imageData;
+  const { width, height, data } = imageData;
+  const source = new Uint8ClampedArray(data);
+  const supportThreshold = Math.max(14, Math.round((settings.edgeLow || settings.cleanup || 12) * 1.8));
+  for (let y = 2; y < height - 2; y += 1) {
+    for (let x = 2; x < width - 2; x += 1) {
+      const offset = (y * width + x) * 4;
+      const alpha = source[offset + 3];
+      if (alpha <= 0 || alpha >= 150) continue;
+      const metrics = colorMetrics(source[offset], source[offset + 1], source[offset + 2]);
+      if (metrics.lightness < 236 || metrics.saturation > 0.11) continue;
+
+      let supportCount = 0;
+      let supportSum = 0;
+      let strongCount = 0;
+      for (let oy = -2; oy <= 2; oy += 1) {
+        for (let ox = -2; ox <= 2; ox += 1) {
+          if (ox === 0 && oy === 0) continue;
+          const next = ((y + oy) * width + x + ox) * 4;
+          const nextAlpha = source[next + 3];
+          if (nextAlpha < supportThreshold) continue;
+          supportCount += 1;
+          supportSum += nextAlpha;
+          if (nextAlpha >= 72) strongCount += 1;
+        }
+      }
+      if (supportCount < 7 || (strongCount < 2 && supportSum / supportCount < 28)) continue;
+      if (!hasTransparentNeighbor(source, width, height, x, y, 3, 10)) continue;
+
+      const supportAverage = supportSum / Math.max(1, supportCount);
+      const highlightTarget = metrics.lightness > 246 ? 96 : 78;
+      const supportedTarget = Math.round(supportAverage * 1.45);
+      data[offset + 3] = Math.round(clamp(Math.max(alpha, highlightTarget, supportedTarget), alpha, 184));
     }
   }
   return imageData;

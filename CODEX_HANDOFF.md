@@ -55,6 +55,7 @@ This file is for continuing the project from another Codex thread or device.
   - `Filter isolated SVG speckles`
   - `Add lightweight QA runner`
   - `Split two-row sticker grids`
+  - `Restore faint transparent highlights`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -78,6 +79,7 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
   - Completed next SVG stage after this note: embedded near-color SVG patch merging with line-art protection.
   - Completed next split stage after this note: compact micro-badge split protection between larger stickers.
   - Completed next photo matte stage after this note: directionally supported semi-transparent photo cores now normalize without hardening isolated hair strands.
+  - Completed next transparent material matte stage after this note: faint near-white glass highlights are restored only when surrounded by semi-transparent material support, with a guard that keeps nearby white background transparent.
   - Completed QA stability stage after this note: removed the external JSZip CDN dependency that blocked app initialization in restricted/offline browser QA, and restored the AI-timeout and solid-background browser guard tests.
   - Completed next SVG stage after this note: low-contrast flat shade patches merge into nearby same-hue fills when line art remains protected.
   - Completed next AI control stage after this note: timeout and manual cancel now abort the active AI background-removal task instead of only resetting UI state.

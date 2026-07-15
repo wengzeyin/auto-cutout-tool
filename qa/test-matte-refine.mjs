@@ -338,10 +338,12 @@ function refineAlpha(image, settings) {
   normalizeDenseCoreAlpha(image, settings);
   guidedSmoothEdgeAlpha(image, settings);
   suppressWhiteFringeAlpha(image, settings);
+  restoreTransparentMaterialHighlights(image, settings);
   antiAliasHardEdges(image, settings);
   polishProductDiagonalEdges(image, settings);
   normalizePostEdgeCoreAlpha(image, settings);
   suppressWhiteFringeAlpha(image, settings);
+  restoreTransparentMaterialHighlights(image, settings);
   suppressDarkBackgroundFringeAlpha(image, settings);
   return image;
 }
@@ -433,6 +435,42 @@ function suppressWhiteFringeAlpha(image, settings = {}) {
       if (lowAlphaIllustrationFringe || fringeStrength > 0) {
         image.data[offset + 3] = lowAlphaIllustrationFringe ? 0 : Math.round(alpha * fringeStrength * preserveMultiplier);
       }
+    }
+  }
+  return image;
+}
+
+function restoreTransparentMaterialHighlights(image, settings = {}) {
+  if (settings.imageType !== "transparentMaterial") return image;
+  const source = new Uint8ClampedArray(image.data);
+  const supportThreshold = Math.max(14, Math.round((settings.edgeLow || settings.cleanup || 12) * 1.8));
+  for (let y = 2; y < height - 2; y += 1) {
+    for (let x = 2; x < width - 2; x += 1) {
+      const offset = (y * width + x) * 4;
+      const alpha = source[offset + 3];
+      if (alpha <= 0 || alpha >= 150) continue;
+      const metrics = colorMetrics(source[offset], source[offset + 1], source[offset + 2]);
+      if (metrics.lightness < 236 || metrics.saturation > 0.11) continue;
+      let supportCount = 0;
+      let supportSum = 0;
+      let strongCount = 0;
+      for (let oy = -2; oy <= 2; oy += 1) {
+        for (let ox = -2; ox <= 2; ox += 1) {
+          if (ox === 0 && oy === 0) continue;
+          const next = ((y + oy) * width + x + ox) * 4;
+          const nextAlpha = source[next + 3];
+          if (nextAlpha < supportThreshold) continue;
+          supportCount += 1;
+          supportSum += nextAlpha;
+          if (nextAlpha >= 72) strongCount += 1;
+        }
+      }
+      if (supportCount < 7 || (strongCount < 2 && supportSum / supportCount < 28)) continue;
+      if (!hasTransparentNeighbor(source, x, y, 3, 10)) continue;
+      const supportAverage = supportSum / Math.max(1, supportCount);
+      const highlightTarget = metrics.lightness > 246 ? 96 : 78;
+      const supportedTarget = Math.round(supportAverage * 1.45);
+      image.data[offset + 3] = Math.round(clamp(Math.max(alpha, highlightTarget, supportedTarget), alpha, 184));
     }
   }
   return image;
@@ -1413,6 +1451,27 @@ refineAlpha(glassAfter, {
   fidelity: "balanced",
   imageType: "transparentMaterial",
 });
+const glassFaintBefore = makeImageData([255, 255, 255, 0]);
+const glassFaintBody = [];
+const glassFaintHighlight = [];
+const glassFaintBackground = [];
+fillEllipse(glassFaintBefore, 82, 58, 34, 29, [218, 241, 248, 58], glassFaintBody);
+drawLine(glassFaintBefore, 63, 44, 84, 36, [252, 255, 255, 24], 1, glassFaintHighlight);
+fillRect(glassFaintBefore, 25, 18, 38, 31, [255, 255, 255, 0], glassFaintBackground);
+const glassFaintAfter = makeImageData([255, 255, 255, 0]);
+glassFaintAfter.data.set(glassFaintBefore.data);
+refineAlpha(glassFaintAfter, {
+  cleanup: 12,
+  residueThreshold: 6,
+  edgeLow: 5,
+  coreThreshold: 242,
+  solidThreshold: 252,
+  midBoost: 0.86,
+  alphaNormalizedThreshold: 256,
+  coreNormalizeThreshold: 0,
+  fidelity: "balanced",
+  imageType: "transparentMaterial",
+});
 const metrics = {
   coreAlpha: averageAlpha(restored.image, core),
   lightAlpha: averageAlpha(restored.image, lightFace),
@@ -1464,6 +1523,9 @@ const metrics = {
   glassCoreAfter: averageAlpha(glassAfter, glassCore),
   glassHighlightAfter: averageAlpha(glassAfter, glassHighlight),
   glassEdgeAfter: averageAlpha(glassAfter, glassEdge),
+  glassFaintBodyAfter: averageAlpha(glassFaintAfter, glassFaintBody),
+  glassFaintHighlightAfter: averageAlpha(glassFaintAfter, glassFaintHighlight),
+  glassFaintBackgroundAfter: averageAlpha(glassFaintAfter, glassFaintBackground),
   residueAlpha: residueAlpha(restored.image, backgroundResidue),
   restoredPixels: restored.restoredPixels,
   fallbackAccepted: shouldUseFallbackMatte(
@@ -1546,6 +1608,9 @@ if (metrics.glassCoreAfter > 238) failures.push(`transparent material core over-
 if (metrics.glassCoreAfter < metrics.glassCoreBefore * 0.5) failures.push(`transparent material core over-cleared: ${metrics.glassCoreBefore.toFixed(1)} -> ${metrics.glassCoreAfter.toFixed(1)}`);
 if (metrics.glassHighlightAfter < 150) failures.push(`transparent material highlight lost: ${metrics.glassHighlightAfter.toFixed(1)}`);
 if (metrics.glassEdgeAfter < 20 || metrics.glassEdgeAfter > 190) failures.push(`transparent material edge alpha out of range: ${metrics.glassEdgeAfter.toFixed(1)}`);
+if (metrics.glassFaintHighlightAfter < 82) failures.push(`faint transparent material highlight lost: ${metrics.glassFaintHighlightAfter.toFixed(1)}`);
+if (metrics.glassFaintHighlightAfter > 190) failures.push(`faint transparent material highlight over-solidified: ${metrics.glassFaintHighlightAfter.toFixed(1)}`);
+if (metrics.glassFaintBackgroundAfter > 1) failures.push(`transparent material highlight restore leaked into white background: ${metrics.glassFaintBackgroundAfter.toFixed(1)}`);
 if (metrics.residueAlpha > 1) failures.push(`background residue remains: ${metrics.residueAlpha.toFixed(1)}`);
 if (metrics.restoredPixels < 100) failures.push(`restored pixel count too low: ${metrics.restoredPixels}`);
 if (metrics.fallbackAccepted) failures.push("fallback decision accepted a worse white-fringe result");
