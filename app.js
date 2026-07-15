@@ -3853,6 +3853,8 @@ function projectionSplit(component, imageData, coreMask, minCoreArea, pad, setti
   if (vertical.length >= 2) return vertical;
   const horizontal = splitByProjection(component, imageData, coreMask, "y", minCoreArea, pad, settings);
   if (horizontal.length >= 2) return horizontal;
+  const repeatedRow = splitRepeatedRowComponent(component, imageData, coreMask, minCoreArea, pad, settings);
+  if (repeatedRow.length >= 2) return repeatedRow;
   const verticalPeaks = splitByProjectionPeaks(component, imageData, coreMask, "x", minCoreArea, pad, settings);
   if (verticalPeaks.length >= 2) return verticalPeaks;
   const horizontalPeaks = splitByProjectionPeaks(component, imageData, coreMask, "y", minCoreArea, pad, settings);
@@ -3861,8 +3863,6 @@ function projectionSplit(component, imageData, coreMask, minCoreArea, pad, setti
   if (verticalValleys.length >= 2) return verticalValleys;
   const horizontalValleys = splitByProjectionValleys(component, imageData, coreMask, "y", minCoreArea, pad, settings);
   if (horizontalValleys.length >= 2) return horizontalValleys;
-  const repeatedRow = splitRepeatedRowComponent(component, imageData, coreMask, minCoreArea, pad, settings);
-  if (repeatedRow.length >= 2) return repeatedRow;
   const repeatedStack = splitRepeatedStackComponent(component, imageData, coreMask, minCoreArea, pad, settings);
   if (repeatedStack.length >= 2) return repeatedStack;
   return splitStackedComponent(component, imageData, coreMask, minCoreArea, pad, settings);
@@ -4146,9 +4146,6 @@ function splitRepeatedStackComponent(component, imageData, coreMask, minCoreArea
   const aspect = component.height / Math.max(1, component.width);
   if (aspect < 2.05 || component.height < 120 || component.width < 24) return [];
 
-  const estimatedParts = clamp(Math.round(aspect), 2, 5);
-  if (estimatedParts < 2) return [];
-
   const { width, height } = imageData;
   const startX = Math.max(0, Math.floor(component.x));
   const startY = Math.max(0, Math.floor(component.y));
@@ -4170,6 +4167,9 @@ function splitRepeatedStackComponent(component, imageData, coreMask, minCoreArea
   const average = nonZero.reduce((sum, value) => sum + value, 0) / nonZero.length;
   const max = Math.max(...smoothed);
   if (!max || average < component.width * 0.18) return [];
+
+  const estimatedParts = clamp(Math.round(aspect), 2, 5);
+  if (estimatedParts < 2) return [];
 
   const cuts = [];
   const partHeight = length / estimatedParts;
@@ -4214,9 +4214,6 @@ function splitRepeatedRowComponent(component, imageData, coreMask, minCoreArea, 
   const aspect = component.width / Math.max(1, component.height);
   if (aspect < 2.8 || component.width < 160 || component.height < 24) return [];
 
-  const estimatedParts = clamp(Math.round(aspect), 2, 6);
-  if (estimatedParts < 2) return [];
-
   const { width, height } = imageData;
   const startX = Math.max(0, Math.floor(component.x));
   const startY = Math.max(0, Math.floor(component.y));
@@ -4239,26 +4236,9 @@ function splitRepeatedRowComponent(component, imageData, coreMask, minCoreArea, 
   const max = Math.max(...smoothed);
   if (!max || average < component.height * 0.18) return [];
 
-  const cuts = [];
-  const partWidth = length / estimatedParts;
-  const searchRadius = Math.max(12, Math.round(partWidth * 0.32));
-  for (let part = 1; part < estimatedParts; part += 1) {
-    const target = Math.round(partWidth * part);
-    let bestIndex = -1;
-    let bestValue = Infinity;
-    for (let cursor = Math.max(6, target - searchRadius); cursor <= Math.min(length - 6, target + searchRadius); cursor += 1) {
-      const value = smoothed[cursor] ?? 0;
-      if (value < bestValue) {
-        bestValue = value;
-        bestIndex = cursor;
-      }
-    }
-    if (bestIndex < 0) continue;
-    const isRealValley = bestValue <= max * 0.94 || bestValue <= average * 1.08;
-    const farFromPrevious = !cuts.length || bestIndex - cuts[cuts.length - 1] >= partWidth * 0.45;
-    if (isRealValley && farFromPrevious) cuts.push(bestIndex);
-  }
-  if (cuts.length < estimatedParts - 1) return [];
+  const repeated = chooseRepeatedProjectionSplit(smoothed, aspect, 6);
+  if (!repeated) return [];
+  const { parts: estimatedParts, cuts } = repeated;
 
   const ranges = [];
   let last = 0;
@@ -4275,6 +4255,72 @@ function splitRepeatedRowComponent(component, imageData, coreMask, minCoreArea, 
   const denseChildren = children.filter((child) => child.alphaDensity >= 0.18 && child.area >= minCoreArea).length;
   if (denseChildren !== children.length || childArea < parentArea * 0.7) return [];
   return children;
+}
+
+function chooseRepeatedProjectionSplit(smoothed, aspect, maxParts) {
+  const candidates = [...new Set([
+    Math.ceil(aspect),
+    Math.round(aspect),
+    Math.floor(aspect),
+  ].map((value) => clamp(value, 2, maxParts)))];
+  let best = null;
+  for (const parts of candidates) {
+    const result = findRepeatedProjectionCuts(smoothed, parts);
+    if (!result) continue;
+    const score = result.balance * 0.72 + parts * 0.035 - result.averageValleyRatio * 0.24;
+    if (!best || score > best.score) best = { ...result, score };
+  }
+  return best;
+}
+
+function findRepeatedProjectionCuts(smoothed, parts) {
+  if (parts < 2) return null;
+  const length = smoothed.length;
+  const partSize = length / parts;
+  const searchRadius = Math.max(12, Math.round(partSize * 0.32));
+  const cuts = [];
+  const valleyRatios = [];
+  for (let part = 1; part < parts; part += 1) {
+    const target = Math.round(partSize * part);
+    let bestIndex = -1;
+    let bestValue = Infinity;
+    for (let cursor = Math.max(6, target - searchRadius); cursor <= Math.min(length - 6, target + searchRadius); cursor += 1) {
+      const value = smoothed[cursor] ?? 0;
+      if (value < bestValue) {
+        bestValue = value;
+        bestIndex = cursor;
+      }
+    }
+    if (bestIndex < 0) continue;
+    const peakWindow = Math.max(8, Math.round(partSize * 0.28));
+    const leftPeak = Math.max(...smoothed.slice(Math.max(0, bestIndex - peakWindow), bestIndex));
+    const rightPeak = Math.max(...smoothed.slice(bestIndex + 1, Math.min(length, bestIndex + peakWindow + 1)));
+    const localPeak = Math.min(leftPeak, rightPeak);
+    const valleyRatio = localPeak > 0 ? bestValue / localPeak : 1;
+    const farFromPrevious = !cuts.length || bestIndex - cuts[cuts.length - 1] >= partSize * 0.42;
+    if (valleyRatio <= 0.74 && farFromPrevious) {
+      cuts.push(bestIndex);
+      valleyRatios.push(valleyRatio);
+    }
+  }
+  if (cuts.length < parts - 1) return null;
+  const ranges = [];
+  let last = 0;
+  for (const cut of cuts) {
+    ranges.push(cut - last);
+    last = cut;
+  }
+  ranges.push(length - last);
+  const minRange = Math.min(...ranges);
+  const maxRange = Math.max(...ranges);
+  const balance = minRange / Math.max(1, maxRange);
+  if (balance < 0.48) return null;
+  return {
+    parts,
+    cuts,
+    balance,
+    averageValleyRatio: valleyRatios.reduce((sum, value) => sum + value, 0) / Math.max(1, valleyRatios.length),
+  };
 }
 
 function smoothProjection(values, radius) {

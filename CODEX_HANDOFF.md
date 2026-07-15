@@ -51,6 +51,7 @@ This file is for continuing the project from another Codex thread or device.
   - `Track SVG cubic handle QA metric`
   - `Align matte worker product edge polish`
   - `Guard manual repair controls`
+  - `Split five-sticker rows`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -83,6 +84,7 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
   - Completed next QA stage after this note: generated QA reports now track `svgCubicHandleOutlierRatio`, validate it, compare it against baselines, and require real-report coverage.
   - Completed next matte consistency stage after this note: the matte worker path now runs product diagonal edge polish in the same order as the main-thread fallback.
   - Completed next designer-usability QA stage after this note: static QA now guards the manual repair controls for split, merge, add-box, adjust-box, and export-selection workflows.
+  - Completed next split stage after this note: horizontal repeated sticker-row splitting now runs before generic projection peaks, chooses better part counts from peak/valley balance, and guards against splitting continuous banners.
   - Recommended next stage: tune real sticker-pack split behavior against more representative assets, or continue SVG path simplification at the curve/command-count layer.
 - The latest algorithm work has focused on making quality regressions measurable before changing more core behavior.
 - Current pushed head before this handoff note: `fdafacb Record SVG edge band QA`; latest local validation ran the full 15-image browser QA without changing the 15-image baseline score.
@@ -227,6 +229,15 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - The test guards the designer fallback controls and wiring for splitting a selected element, merging selected elements, saving a manual selection as a new element, updating a selected element box, and exporting the current manual selection.
 - The guard checks `index.html` controls, `app.js` element bindings, event bindings, workflow functions, and key persistence/renumbering invariants.
 - Validation on `2026-07-15`: manual repair control QA passed; matte worker parity, matte refine, image-type, multi-split, SVG vector, local ZIP, AI timeout guard, solid-background fast-cutout, report validation, report compare, report metric coverage, runner health, and summary risk QA all passed locally.
+
+### Five-Sticker Row Split - Done
+
+- Moved the horizontal repeated-row splitter ahead of generic projection peak splitting so a clear row of touching stickers can be counted before the broader projection heuristic collapses adjacent items.
+- Replaced row part-count selection with a peak/valley balance scorer. The splitter now considers floor/round/ceil candidates, prefers balanced repeated ranges, and requires real valley contrast so uniform banners are not cut apart.
+- Left the vertical repeated-stack fallback on its previous strategy because it already protects the 3x3 touching sticker-stack case.
+- Added `five-touching-wide-stickers` regression coverage in `qa/test-multi-split.mjs`; expected output is exactly 5 components.
+- Added `continuous-wide-banner-not-row-split` as an over-split guard; expected output is exactly 1 component.
+- Validation on `2026-07-15`: syntax checks passed; multi-split, matte worker parity, matte refine, image-type, SVG vector, local ZIP, manual repair controls, AI timeout guard, solid-background fast-cutout, report validation, report compare, report metric coverage, runner health, and summary risk QA all passed locally.
 
 ## Already Implemented Before UI Pass
 
