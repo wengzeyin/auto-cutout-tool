@@ -42,6 +42,7 @@ This file is for continuing the project from another Codex thread or device.
   - `Merge embedded SVG color patches`
   - `Protect micro split badges`
   - `Normalize directional photo cores`
+  - `Vendor local ZIP for offline QA`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -65,7 +66,8 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
   - Completed next SVG stage after this note: embedded near-color SVG patch merging with line-art protection.
   - Completed next split stage after this note: compact micro-badge split protection between larger stickers.
   - Completed next photo matte stage after this note: directionally supported semi-transparent photo cores now normalize without hardening isolated hair strands.
-  - Recommended next stage: tune real sticker-pack split behavior against more representative assets, continue SVG path simplification at the curve/command-count layer, or investigate the current browser guard test page-state timeout.
+  - Completed QA stability stage after this note: removed the external JSZip CDN dependency that blocked app initialization in restricted/offline browser QA, and restored the AI-timeout and solid-background browser guard tests.
+  - Recommended next stage: tune real sticker-pack split behavior against more representative assets, or continue SVG path simplification at the curve/command-count layer.
   - Secondary target: actual AI cancellation behavior for large images beyond the existing timeout guard.
 - The latest algorithm work has focused on making quality regressions measurable before changing more core behavior.
 - Current pushed head before this handoff note: `fdafacb Record SVG edge band QA`; latest local validation ran the full 15-image browser QA without changing the 15-image baseline score.
@@ -140,6 +142,15 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - Mirrored the logic in `app.js`, `matte-worker.js`, and `qa/test-matte-refine.mjs`.
 - Added matte regression coverage: `directionalCoreAfter` restores to `255`, while `directionalHairAfter` remains `118`.
 - Validation on `2026-07-15`: syntax checks passed for `app.js`, `matte-worker.js`, and `qa/test-matte-refine.mjs`; matte, image-type, multi-split, SVG vector, report validation, report compare, runner health, summary risk, and report metric coverage QA passed locally. Browser guard tests `qa/test-ai-timeout-guard.mjs` and `qa/test-solid-background-fast-cutout.mjs` still timed out waiting for page state and should be investigated separately.
+
+### Offline ZIP Vendor and Browser QA Restore - Done
+
+- Replaced the external `https://esm.sh/jszip@3.10.1` static import with local `vendor-jszip.mjs`.
+- The local ZIP helper supports the app's current export usage: `new JSZip()`, `file()`, `folder().file()`, and `generateAsync({ type: "blob" })`, using standard store-mode ZIP output.
+- This fixes restricted/offline browser QA where the blocked JSZip CDN import prevented `app.js` from initializing, so uploads never reached the queue.
+- Updated browser guard tests to upload generated PNGs through Playwright `setInputFiles()` instead of manually assigning `DataTransfer.files`.
+- Added `qa/test-local-zip.mjs` to check ZIP signature, nested filenames, and non-empty output.
+- Validation on `2026-07-15`: `qa/test-ai-timeout-guard.mjs` passed in 539ms recovery, `qa/test-solid-background-fast-cutout.mjs` passed for black, black-halo, and white cases with no model-resource requests, and the local ZIP regression passed.
 
 ## Already Implemented Before UI Pass
 
@@ -367,6 +378,7 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
   - `node qa/test-multi-split.mjs`
   - `node qa/test-svg-vector.mjs`
   - `node qa/test-ai-timeout-guard.mjs`
+  - `node qa/test-local-zip.mjs`
   - `node qa/test-validate-report.mjs`
   - `node qa/test-compare-report.mjs`
   - `node qa/test-runner-health.mjs`

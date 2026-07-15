@@ -1,5 +1,5 @@
 import { removeBackground } from "./vendor-imgly-background-removal.mjs";
-import JSZip from "https://esm.sh/jszip@3.10.1";
+import JSZip from "./vendor-jszip.mjs";
 
 const els = {
   appRoot: document.querySelector("#appRoot"),

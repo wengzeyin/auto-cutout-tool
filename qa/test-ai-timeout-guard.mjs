@@ -37,7 +37,7 @@ try {
   await page.evaluate(() => {
     window.__cutoutDebug = { simulateAiHang: true, aiTimeoutMs: 350 };
   });
-  await injectNonSolidImage(page);
+  await uploadNonSolidImage(page);
   await page.waitForFunction(() => document.querySelectorAll(".queue-item").length === 1, null, { timeout: 10_000 });
 
   const started = Date.now();
@@ -77,8 +77,8 @@ try {
   await waitForExit(server, 3000).catch(() => {});
 }
 
-async function injectNonSolidImage(page) {
-  await page.evaluate(async () => {
+async function uploadNonSolidImage(page) {
+  const bytes = await page.evaluate(async () => {
     const canvas = document.createElement("canvas");
     canvas.width = 720;
     canvas.height = 520;
@@ -101,12 +101,12 @@ async function injectNonSolidImage(page) {
     ctx.font = "bold 86px sans-serif";
     ctx.fillText("TIMEOUT", 120, 270);
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
-    const file = new File([blob], "non-solid-timeout.png", { type: "image/png" });
-    const data = new DataTransfer();
-    data.items.add(file);
-    const input = document.querySelector("#fileInput");
-    input.files = data.files;
-    input.dispatchEvent(new Event("change", { bubbles: true }));
+    return Array.from(new Uint8Array(await blob.arrayBuffer()));
+  });
+  await page.locator("#fileInput").setInputFiles({
+    name: "non-solid-timeout.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(bytes),
   });
 }
 

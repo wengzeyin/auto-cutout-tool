@@ -76,7 +76,7 @@ async function runSolidBackgroundCase(page, kind) {
   try {
     await page.goto(baseUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
     await page.locator("#fileInput").waitFor({ state: "attached", timeout: 30_000 });
-    await injectSolidBackgroundFile(page, kind);
+    await uploadSolidBackgroundFile(page, kind);
     await page.waitForFunction(() => document.querySelectorAll(".queue-item").length === 1, null, { timeout: 10_000 });
 
     const started = Date.now();
@@ -96,8 +96,8 @@ async function runSolidBackgroundCase(page, kind) {
   }
 }
 
-async function injectSolidBackgroundFile(page, kind) {
-  await page.evaluate(async (imageKind) => {
+async function uploadSolidBackgroundFile(page, kind) {
+  const bytes = await page.evaluate(async (imageKind) => {
     const canvas = document.createElement("canvas");
     canvas.width = 900;
     canvas.height = 620;
@@ -126,12 +126,7 @@ async function injectSolidBackgroundFile(page, kind) {
     }
 
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
-    const file = new File([blob], `${imageKind}-solid-background.png`, { type: "image/png" });
-    const data = new DataTransfer();
-    data.items.add(file);
-    const input = document.querySelector("#fileInput");
-    input.files = data.files;
-    input.dispatchEvent(new Event("change", { bubbles: true }));
+    return Array.from(new Uint8Array(await blob.arrayBuffer()));
 
     function drawSticker(context, x, y, color, halo = false) {
       context.save();
@@ -156,6 +151,11 @@ async function injectSolidBackgroundFile(page, kind) {
       context.restore();
     }
   }, kind);
+  await page.locator("#fileInput").setInputFiles({
+    name: `${kind}-solid-background.png`,
+    mimeType: "image/png",
+    buffer: Buffer.from(bytes),
+  });
 }
 
 async function readResultMetrics(page) {
