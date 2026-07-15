@@ -40,6 +40,7 @@ This file is for continuing the project from another Codex thread or device.
   - `Merge SVG edge color bands`
   - `Protect neutral illustration interiors`
   - `Merge embedded SVG color patches`
+  - `Protect micro split badges`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -61,6 +62,7 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
   - The next useful work should stay algorithm/QA-focused rather than UI-focused unless the product direction changes.
   - Completed next stage after this note: neutral light illustration interior matte protection with regression coverage.
   - Completed next SVG stage after this note: embedded near-color SVG patch merging with line-art protection.
+  - Completed next split stage after this note: compact micro-badge split protection between larger stickers.
   - Recommended next stage: tune real sticker-pack split behavior against more representative assets, or continue SVG path simplification at the curve/command-count layer.
   - Secondary target: actual AI cancellation behavior for large images beyond the existing timeout guard.
 - The latest algorithm work has focused on making quality regressions measurable before changing more core behavior.
@@ -118,6 +120,15 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - Protected dark and gray line art are excluded from the embedded merge path, so logo strokes and drawn lines stay as separate editable paths.
 - Added SVG regression coverage in `qa/test-svg-vector.mjs`: embedded green patches merge to `embeddedPatchGreenGroups: 1`, path count remains `5`, dark line-art area remains `708`, and gray line-art area remains `140`.
 - Validation on `2026-07-15`: syntax checks passed; matte, image-type, multi-split, SVG vector, AI timeout guard, report validation, report compare, runner health, summary risk, report metric coverage, and solid-background fast-cutout QA all passed locally.
+
+### Micro Split Badge Protection - Done
+
+- Added compact tiny-core seed detection so clear 4px+ micro elements can become split candidates even when they are below the normal core-area threshold.
+- Tracked strong-alpha content bounds and density for split components, so padding and weak low-alpha bridges no longer dilute small but clear badges.
+- Protected compact tiny-core components from being absorbed into nearby large stickers during multi-object fragment cleanup.
+- When testing whether a small part is separate from a larger overlapping box, the larger strong-content measurement now excludes the small part's own pixels. This prevents a large padded box from "proving" the tiny element is connected to itself.
+- Added `micro-badges-between-large-stickers` regression coverage in `qa/test-multi-split.mjs`; expected output is exactly 5 components.
+- Validation on `2026-07-15`: syntax checks passed; matte, image-type, multi-split, SVG vector, report validation, report compare, runner health, summary risk, and report metric coverage QA passed locally. Browser guard tests `qa/test-ai-timeout-guard.mjs` and `qa/test-solid-background-fast-cutout.mjs` timed out waiting for page state in this session and should be rerun after confirming the local page/dev server is responding normally.
 
 ## Already Implemented Before UI Pass
 

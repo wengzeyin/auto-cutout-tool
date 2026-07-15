@@ -3356,13 +3356,25 @@ function findCoreSeeds(mask, width, height, minArea) {
         }
       }
 
-      if (pixels.length >= minArea) {
+      if (pixels.length >= minArea || isClearTinyCoreSeed(pixels.length, minX, minY, maxX, maxY, minArea)) {
         seeds.push({ id: seeds.length, pixels, area: pixels.length, x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 });
       }
     }
   }
 
   return seeds;
+}
+
+function isClearTinyCoreSeed(area, minX, minY, maxX, maxY, minArea) {
+  const width = maxX - minX + 1;
+  const height = maxY - minY + 1;
+  const minDimension = Math.min(width, height);
+  const maxDimension = Math.max(width, height);
+  const boxArea = Math.max(1, width * height);
+  const density = area / boxArea;
+  if (area < Math.max(18, minArea * 0.22)) return false;
+  if (minDimension < 4 || maxDimension > Math.max(18, minDimension * 3.2)) return false;
+  return density >= 0.52;
 }
 
 function growSeedsIntoSupport(seeds, supportMask, width, height) {
@@ -3401,6 +3413,10 @@ function componentsFromLabels(labels, count, width, height, imageData, alphaThre
     minY: Infinity,
     maxX: -Infinity,
     maxY: -Infinity,
+    strongMinX: Infinity,
+    strongMinY: Infinity,
+    strongMaxX: -Infinity,
+    strongMaxY: -Infinity,
     area: 0,
     strongAlphaArea: 0,
   }));
@@ -3412,7 +3428,13 @@ function componentsFromLabels(labels, count, width, height, imageData, alphaThre
     const py = Math.floor(index / width);
     const box = boxes[label];
     box.area += 1;
-    if (imageData.data[index * 4 + 3] >= alphaThreshold) box.strongAlphaArea += 1;
+    if (imageData.data[index * 4 + 3] >= alphaThreshold) {
+      box.strongAlphaArea += 1;
+      if (px < box.strongMinX) box.strongMinX = px;
+      if (px > box.strongMaxX) box.strongMaxX = px;
+      if (py < box.strongMinY) box.strongMinY = py;
+      if (py > box.strongMaxY) box.strongMaxY = py;
+    }
     if (px < box.minX) box.minX = px;
     if (px > box.maxX) box.maxX = px;
     if (py < box.minY) box.minY = py;
@@ -3423,6 +3445,10 @@ function componentsFromLabels(labels, count, width, height, imageData, alphaThre
     .filter((box) => box.area > 0)
     .map((box, index) => {
       const padded = padBox(box, pad, width, height);
+      const contentWidth = box.maxX - box.minX + 1;
+      const contentHeight = box.maxY - box.minY + 1;
+      const strongContentWidth = box.strongAlphaArea ? box.strongMaxX - box.strongMinX + 1 : contentWidth;
+      const strongContentHeight = box.strongAlphaArea ? box.strongMaxY - box.strongMinY + 1 : contentHeight;
       const component = {
         id: index + 1,
         area: box.area,
@@ -3431,6 +3457,12 @@ function componentsFromLabels(labels, count, width, height, imageData, alphaThre
         y: padded.minY,
         width: padded.maxX - padded.minX + 1,
         height: padded.maxY - padded.minY + 1,
+        contentWidth,
+        contentHeight,
+        contentDensity: box.area / Math.max(1, contentWidth * contentHeight),
+        strongContentWidth,
+        strongContentHeight,
+        strongContentDensity: box.strongAlphaArea / Math.max(1, strongContentWidth * strongContentHeight),
       };
       const boxArea = component.width * component.height;
       component.alphaDensity = component.area / Math.max(1, boxArea);
@@ -3446,7 +3478,16 @@ function keepMultiObjectComponent(component, imageArea, minArea) {
   const residualLine = (aspect > 10 || aspect < 0.1) && component.alphaDensity < 0.24;
   const weakResidual = component.strongAlphaArea < Math.max(4, minArea * 0.12) && component.alphaDensity < 0.18;
   const smallScore = scoreSmallComponent(component, imageArea, minArea);
-  return (meaningfulArea || denseSmall || smallScore >= 0.72) && !residualLine && !weakResidual;
+  const contentWidth = component.strongContentWidth ?? component.contentWidth ?? component.width;
+  const contentHeight = component.strongContentHeight ?? component.contentHeight ?? component.height;
+  const contentMinDimension = Math.min(contentWidth, contentHeight);
+  const contentAspect = contentWidth / Math.max(1, contentHeight);
+  const clearTinyCore = component.strongAlphaArea >= Math.max(18, minArea * 0.04)
+    && contentMinDimension >= 4
+    && (component.strongContentDensity ?? component.contentDensity ?? component.alphaDensity) >= 0.52
+    && contentAspect <= 3.4
+    && contentAspect >= 1 / 3.4;
+  return (meaningfulArea || denseSmall || smallScore >= 0.72 || clearTinyCore) && !residualLine && (!weakResidual || clearTinyCore);
 }
 
 function scoreSmallComponent(component, imageArea, minArea) {
@@ -4144,6 +4185,9 @@ function measureBoxAsComponent(box, imageData, alphaThreshold) {
     alphaDensity: metrics.alphaDensity,
     boxArea: metrics.boxArea,
     boxRatio: metrics.boxRatio,
+    strongContentWidth: metrics.strongContentWidth,
+    strongContentHeight: metrics.strongContentHeight,
+    strongContentDensity: metrics.strongContentDensity,
   };
 }
 
@@ -4213,6 +4257,11 @@ function absorbTinyMultiObjectFragments(components, imageData, minArea, settings
 
   for (const component of sorted) {
     if (large.includes(component)) continue;
+    const measured = measureBoxAsComponent(component, imageData, Math.max(24, settings.supportBase || 22));
+    if (hasCompactTinyCoreComponent(measured, imageArea, minArea)) {
+      output.push({ ...measured });
+      continue;
+    }
     if (hasClearStandaloneTinyComponent(component, output, imageData, minArea, settings, absorbDistance)) {
       output.push({ ...component });
       continue;
@@ -4232,15 +4281,28 @@ function absorbTinyMultiObjectFragments(components, imageData, minArea, settings
   return output;
 }
 
+function hasCompactTinyCoreComponent(component, imageArea, minArea) {
+  const minDimension = Math.min(component.strongContentWidth || component.width, component.strongContentHeight || component.height);
+  const maxDimension = Math.max(component.strongContentWidth || component.width, component.strongContentHeight || component.height);
+  const strongDensity = component.strongContentDensity || component.alphaDensity || 0;
+  const compactShape = maxDimension <= Math.max(18, minDimension * 3.2);
+  const smallEnough = (component.area || 0) <= Math.max(minArea * 0.45, imageArea * 0.0012);
+  return smallEnough
+    && (component.strongAlphaArea || 0) >= Math.max(18, minArea * 0.04)
+    && minDimension >= 4
+    && compactShape
+    && strongDensity >= 0.52;
+}
+
 function hasClearStandaloneTinyComponent(component, candidates, imageData, minArea, settings, absorbDistance) {
   if ((settings.mergeDistance ?? 4) > 4 || !candidates.length) return false;
   const alphaThreshold = Math.max(24, settings.supportBase || 22);
   const measured = measureBoxAsComponent(component, imageData, alphaThreshold);
   const imageArea = imageData.width * imageData.height;
   const quality = scoreSmallComponent(measured, imageArea, minArea);
-  const minDimension = Math.min(measured.width, measured.height);
+  const minDimension = Math.min(measured.strongContentWidth || measured.width, measured.strongContentHeight || measured.height);
   const strongRatio = measured.alphaArea ? measured.strongAlphaArea / measured.alphaArea : 0;
-  const compactCore = minDimension >= 7 && measured.alphaDensity >= 0.28 && strongRatio >= 0.5;
+  const compactCore = minDimension >= 4 && (measured.strongContentDensity || measured.alphaDensity) >= 0.52 && strongRatio >= 0.12;
   if (quality < 0.68 && !compactCore) return false;
   const nearby = candidates
     .map((candidate) => ({ candidate, distance: boxDistance(measured, candidate) }))
@@ -4630,11 +4692,19 @@ function isClearStandaloneSmallPart(smaller, larger, imageData, alphaThreshold) 
   const measured = measureBoxAsComponent(smaller, imageData, Math.max(24, alphaThreshold));
   const quality = scoreSmallComponent(measured, imageArea, Math.max(8, imageArea * 0.001));
   const minDimension = Math.min(measured.width, measured.height);
-  if (quality < 0.78 || measured.alphaDensity < 0.24 || minDimension < 8) return false;
 
   const smallContent = strongContentBounds(smaller, imageData, threshold);
-  const largeContent = strongContentBounds(larger, imageData, threshold);
+  const largeContent = smallContent
+    ? strongContentBoundsExcludingRect(larger, imageData, threshold, smallContent)
+    : strongContentBounds(larger, imageData, threshold);
   if (!smallContent || !largeContent) return false;
+  const contentMinDimension = Math.min(smallContent.width, smallContent.height);
+  const contentAspect = smallContent.width / Math.max(1, smallContent.height);
+  const compactStrongContent = smallContent.area >= Math.max(18, imageArea * 0.00004)
+    && contentMinDimension >= 4
+    && contentAspect <= 3.4
+    && contentAspect >= 1 / 3.4;
+  if ((quality < 0.78 || measured.alphaDensity < 0.24 || minDimension < 8) && !compactStrongContent) return false;
   const contentDistance = boxDistance(smallContent, largeContent);
   const overlapX = axisOverlapRatio(smallContent.x, smallContent.width, largeContent.x, largeContent.width);
   const overlapY = axisOverlapRatio(smallContent.y, smallContent.height, largeContent.y, largeContent.height);
@@ -4649,7 +4719,9 @@ function isClearStandaloneSmallPart(smaller, larger, imageData, alphaThreshold) 
 function hasRelaxedStandaloneSmallPartSeparation(smaller, larger, imageData, alphaThreshold) {
   const threshold = Math.max(72, alphaThreshold * 2.1);
   const smallContent = strongContentBounds(smaller, imageData, threshold);
-  const largeContent = strongContentBounds(larger, imageData, threshold);
+  const largeContent = smallContent
+    ? strongContentBoundsExcludingRect(larger, imageData, threshold, smallContent)
+    : strongContentBounds(larger, imageData, threshold);
   if (!smallContent || !largeContent) return false;
   const minDimension = Math.min(smallContent.width, smallContent.height);
   if (minDimension < 6 || smallContent.area < 18) return false;
@@ -4661,6 +4733,36 @@ function hasRelaxedStandaloneSmallPartSeparation(smaller, larger, imageData, alp
   const gap = gapRectBetweenBoxes(smallContent, largeContent);
   if (!gap) return false;
   return alphaDensityInRect(imageData, gap, threshold) < 0.1;
+}
+
+function strongContentBoundsExcludingRect(component, imageData, alphaThreshold, excludeRect) {
+  const { width, height, data } = imageData;
+  const startX = Math.max(0, Math.floor(component.x));
+  const startY = Math.max(0, Math.floor(component.y));
+  const endX = Math.min(width, Math.ceil(component.x + component.width));
+  const endY = Math.min(height, Math.ceil(component.y + component.height));
+  const excludeStartX = Math.max(0, Math.floor(excludeRect.x) - 1);
+  const excludeStartY = Math.max(0, Math.floor(excludeRect.y) - 1);
+  const excludeEndX = Math.min(width, Math.ceil(excludeRect.x + excludeRect.width) + 1);
+  const excludeEndY = Math.min(height, Math.ceil(excludeRect.y + excludeRect.height) + 1);
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let area = 0;
+  for (let y = startY; y < endY; y += 1) {
+    for (let x = startX; x < endX; x += 1) {
+      if (x >= excludeStartX && x < excludeEndX && y >= excludeStartY && y < excludeEndY) continue;
+      if (data[(y * width + x) * 4 + 3] < alphaThreshold) continue;
+      area += 1;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
+  if (!area) return null;
+  return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1, area };
 }
 
 function strongContentBounds(component, imageData, alphaThreshold) {
@@ -4957,20 +5059,35 @@ function measureComponent(component, imageData, alphaThreshold) {
   const endY = Math.min(height, Math.ceil(component.y + component.height));
   let alphaArea = 0;
   let strongAlphaArea = 0;
+  let strongMinX = Infinity;
+  let strongMinY = Infinity;
+  let strongMaxX = -Infinity;
+  let strongMaxY = -Infinity;
   for (let y = startY; y < endY; y += 1) {
     for (let x = startX; x < endX; x += 1) {
       const alpha = data[(y * width + x) * 4 + 3];
       if (alpha >= alphaThreshold) alphaArea += 1;
-      if (alpha >= 96) strongAlphaArea += 1;
+      if (alpha >= 96) {
+        strongAlphaArea += 1;
+        if (x < strongMinX) strongMinX = x;
+        if (x > strongMaxX) strongMaxX = x;
+        if (y < strongMinY) strongMinY = y;
+        if (y > strongMaxY) strongMaxY = y;
+      }
     }
   }
   const boxArea = Math.max(1, (endX - startX) * (endY - startY));
+  const strongContentWidth = strongAlphaArea ? strongMaxX - strongMinX + 1 : 0;
+  const strongContentHeight = strongAlphaArea ? strongMaxY - strongMinY + 1 : 0;
   return {
     boxArea,
     alphaArea,
     strongAlphaArea,
     alphaDensity: alphaArea / boxArea,
     boxRatio: boxArea / Math.max(1, width * height),
+    strongContentWidth,
+    strongContentHeight,
+    strongContentDensity: strongAlphaArea / Math.max(1, strongContentWidth * strongContentHeight),
   };
 }
 
