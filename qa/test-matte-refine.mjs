@@ -339,6 +339,7 @@ function refineAlpha(image, settings) {
   guidedSmoothEdgeAlpha(image, settings);
   suppressWhiteFringeAlpha(image, settings);
   antiAliasHardEdges(image, settings);
+  polishProductDiagonalEdges(image, settings);
   normalizePostEdgeCoreAlpha(image, settings);
   suppressWhiteFringeAlpha(image, settings);
   suppressDarkBackgroundFringeAlpha(image, settings);
@@ -599,6 +600,45 @@ function antiAliasHardEdges(image, settings = {}) {
   return image;
 }
 
+function polishProductDiagonalEdges(image, settings = {}) {
+  if (settings.imageType !== "product") return image;
+  const source = new Uint8ClampedArray(image.data);
+  const lowThreshold = Math.max(8, Math.round((settings.edgeLow || settings.cleanup || 18) * 0.85));
+  const strongThreshold = 232;
+  const factor = settings.fidelity === "clean" ? 0.3 : settings.fidelity === "preserve" ? 0.16 : 0.24;
+  for (let y = 2; y < height - 2; y += 1) {
+    for (let x = 2; x < width - 2; x += 1) {
+      const offset = (y * width + x) * 4;
+      const alpha = source[offset + 3];
+      let transparent = 0;
+      let strong = 0;
+      let alphaSum = 0;
+      let weightSum = 0;
+      for (let oy = -2; oy <= 2; oy += 1) {
+        for (let ox = -2; ox <= 2; ox += 1) {
+          const distance = Math.max(Math.abs(ox), Math.abs(oy));
+          const weight = distance === 0 ? 4 : distance === 1 ? 2 : 1;
+          const neighborAlpha = source[((y + oy) * width + x + ox) * 4 + 3];
+          if (neighborAlpha <= lowThreshold) transparent += 1;
+          if (neighborAlpha >= strongThreshold) strong += 1;
+          alphaSum += neighborAlpha * weight;
+          weightSum += weight;
+        }
+      }
+      if (transparent < 2 || strong < 2) continue;
+      const mixed = alphaSum / Math.max(1, weightSum);
+      if (alpha >= 246 && transparent >= 4 && strong <= 18) {
+        image.data[offset + 3] = Math.round(clamp(alpha * (1 - factor) + mixed * factor, 142, 224));
+      } else if (alpha <= lowThreshold && strong >= 3 && transparent <= 20) {
+        image.data[offset + 3] = Math.round(clamp(mixed * factor * 0.52, 0, 92));
+      } else if (alpha > lowThreshold && alpha < 246 && transparent >= 2 && strong >= 2) {
+        image.data[offset + 3] = Math.round(clamp(alpha * (1 - factor) + mixed * factor, 0, 255));
+      }
+    }
+  }
+  return image;
+}
+
 function normalizeSemiOpaqueCore(image, settings) {
   const threshold = Number(settings.postCoreNormalizeThreshold || 0);
   if (!threshold) return image;
@@ -746,6 +786,15 @@ function averageAlphaInRect(image, x1, y1, x2, y2) {
     }
   }
   return count ? total / count : 0;
+}
+
+function countAlphaRange(image, minAlpha, maxAlpha) {
+  let count = 0;
+  for (let index = 3; index < image.data.length; index += 4) {
+    const alpha = image.data[index];
+    if (alpha >= minAlpha && alpha <= maxAlpha) count += 1;
+  }
+  return count;
 }
 
 function defringe(image, settings = {}) {
@@ -1146,6 +1195,17 @@ for (let y = 18; y < height - 18; y += 1) {
 const jaggedAfter = makeImageData([255, 255, 255, 0]);
 jaggedAfter.data.set(jaggedBefore.data);
 antiAliasHardEdges(jaggedAfter, { cleanup: 18, edgeLow: 8, imageType: "product" });
+const productStairBefore = makeImageData([255, 255, 255, 0]);
+for (let y = 18; y < 104; y += 1) {
+  const left = 34 + Math.floor(y / 5) * 2 + (y % 3 === 0 ? 3 : 0);
+  for (let x = left; x < 122; x += 1) setPixel(productStairBefore, x, y, [44, 160, 130, 255]);
+}
+const productStairAntiAlias = makeImageData([255, 255, 255, 0]);
+productStairAntiAlias.data.set(productStairBefore.data);
+antiAliasHardEdges(productStairAntiAlias, { cleanup: 18, edgeLow: 8, imageType: "product" });
+const productStairPolished = makeImageData([255, 255, 255, 0]);
+productStairPolished.data.set(productStairAntiAlias.data);
+polishProductDiagonalEdges(productStairPolished, { cleanup: 18, edgeLow: 8, imageType: "product" });
 const guidedBefore = makeImageData([255, 255, 255, 0]);
 for (let y = 24; y <= 96; y += 1) {
   for (let x = 24; x <= 92; x += 1) setPixel(guidedBefore, x, y, [64, 150, 130, 255]);
@@ -1370,6 +1430,10 @@ const metrics = {
   whiteFringeLightness: averageLightness(restored.image, whiteFringe),
   jaggedBefore: edgeJaggedness(jaggedBefore),
   jaggedAfter: edgeJaggedness(jaggedAfter),
+  productStairAntiAlias: edgeJaggedness(productStairAntiAlias),
+  productStairPolished: edgeJaggedness(productStairPolished),
+  productStairAntiAliasSoftPixels: countAlphaRange(productStairAntiAlias, 24, 224),
+  productStairPolishedSoftPixels: countAlphaRange(productStairPolished, 24, 224),
   guidedBefore: averageAlphaInRect(guidedBefore, 93, 24, 93, 96),
   guidedAfter: averageAlphaInRect(guidedAfter, 93, 24, 93, 96),
   guidedNoiseAfter: averageAlphaInRect(guidedAfter, 94, 24, 94, 96),
@@ -1457,6 +1521,7 @@ if (metrics.neutralInteriorShadowAlpha < 130) failures.push(`neutral interior li
 if (metrics.neutralBackgroundPatchAlpha > 55) failures.push(`neutral background patch was over-restored: ${metrics.neutralBackgroundPatchAlpha.toFixed(1)}`);
 if (metrics.whiteFringeAlpha > 42 && metrics.whiteFringeLightness > 220) failures.push(`white fringe still visible: alpha ${metrics.whiteFringeAlpha.toFixed(1)}, lightness ${metrics.whiteFringeLightness.toFixed(1)}`);
 if (metrics.jaggedAfter >= metrics.jaggedBefore * 0.7) failures.push(`jagged edge not softened: ${metrics.jaggedBefore.toFixed(3)} -> ${metrics.jaggedAfter.toFixed(3)}`);
+if (metrics.productStairPolishedSoftPixels <= metrics.productStairAntiAliasSoftPixels + 12) failures.push(`product stair edge did not gain enough soft transition pixels: ${metrics.productStairAntiAliasSoftPixels} -> ${metrics.productStairPolishedSoftPixels}`);
 if (metrics.guidedAfter <= metrics.guidedBefore + 10) failures.push(`guided edge alpha did not move toward similar solid neighbor: ${metrics.guidedBefore.toFixed(1)} -> ${metrics.guidedAfter.toFixed(1)}`);
 if (metrics.guidedNoiseAfter > 45) failures.push(`guided smoothing leaked into dissimilar noise: ${metrics.guidedNoiseAfter.toFixed(1)}`);
 if (metrics.stickerFringeAfter >= metrics.stickerFringeBefore * 0.45) failures.push(`sticker white fringe not reduced enough: ${metrics.stickerFringeBefore.toFixed(1)} -> ${metrics.stickerFringeAfter.toFixed(1)}`);

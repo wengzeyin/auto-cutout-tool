@@ -45,6 +45,7 @@ This file is for continuing the project from another Codex thread or device.
   - `Vendor local ZIP for offline QA`
   - `Merge SVG flat shade patches`
   - `Abort AI timeout and cancel tasks`
+  - `Polish product diagonal edges`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -71,6 +72,7 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
   - Completed QA stability stage after this note: removed the external JSZip CDN dependency that blocked app initialization in restricted/offline browser QA, and restored the AI-timeout and solid-background browser guard tests.
   - Completed next SVG stage after this note: low-contrast flat shade patches merge into nearby same-hue fills when line art remains protected.
   - Completed next AI control stage after this note: timeout and manual cancel now abort the active AI background-removal task instead of only resetting UI state.
+  - Completed next product matte stage after this note: product-only diagonal/stair-step edge polishing adds a softer alpha transition after hard-edge anti-aliasing.
   - Recommended next stage: tune real sticker-pack split behavior against more representative assets, or continue SVG path simplification at the curve/command-count layer.
 - The latest algorithm work has focused on making quality regressions measurable before changing more core behavior.
 - Current pushed head before this handoff note: `fdafacb Record SVG edge band QA`; latest local validation ran the full 15-image browser QA without changing the 15-image baseline score.
@@ -171,6 +173,13 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - Stale/canceled task errors are no longer logged as current processing errors after the token has changed.
 - Extended `qa/test-ai-timeout-guard.mjs`: timeout recovery now asserts `aiAbortObserved: true`, and a second manual-cancel scenario verifies the process button re-enables, cancel hides, queue shows canceled, and the underlying task aborts.
 - Validation on `2026-07-15`: AI timeout/cancel guard passed; matte, image-type, multi-split, SVG vector, local ZIP, solid-background fast-cutout, report validation, report compare, runner health, summary risk, and report metric coverage QA all passed locally.
+
+### Product Diagonal Edge Polish - Done
+
+- Added `polishProductDiagonalEdges()` after hard-edge anti-aliasing for product images only.
+- The pass softens stair-step/diagonal product edges by adding a narrow alpha transition where transparent and strong subject pixels meet, while leaving photo, sticker, illustration, line-art, and transparent-material routing untouched.
+- Added matte regression coverage in `qa/test-matte-refine.mjs`: the synthetic product stair edge must gain soft transition pixels after the product-only polish (`631 -> 649` in the latest run).
+- Validation on `2026-07-15`: syntax checks passed; matte, image-type, multi-split, SVG vector, local ZIP, AI timeout guard, solid-background fast-cutout, report validation, report compare, runner health, summary risk, and report metric coverage QA all passed locally.
 
 ## Already Implemented Before UI Pass
 

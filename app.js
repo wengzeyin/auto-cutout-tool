@@ -2137,6 +2137,7 @@ function refineCutoutAlpha(sourceCanvas, settings) {
   guidedSmoothEdgeAlpha(imageData, settings);
   suppressWhiteFringeAlpha(imageData, settings);
   antiAliasHardEdges(imageData, settings);
+  polishProductDiagonalEdges(imageData, settings);
   normalizePostEdgeCoreAlpha(imageData, settings);
   suppressWhiteFringeAlpha(imageData, settings);
   suppressDarkBackgroundFringeAlpha(imageData, settings);
@@ -2338,6 +2339,47 @@ function antiAliasHardEdges(imageData, settings = {}) {
         data[offset + 3] = Math.round(clamp(alpha * (1 - factor) + mixed * factor, 96, 246));
       } else if (alpha <= lowThreshold && strong >= 2 && transparent <= 6) {
         data[offset + 3] = Math.round(clamp(mixed * factor * 0.55, 0, 96));
+      }
+    }
+  }
+  return imageData;
+}
+
+function polishProductDiagonalEdges(imageData, settings = {}) {
+  if (settings.imageType !== "product") return imageData;
+  const { width, height, data } = imageData;
+  const source = new Uint8ClampedArray(data);
+  const lowThreshold = Math.max(8, Math.round((settings.edgeLow || settings.cleanup || 18) * 0.85));
+  const strongThreshold = 232;
+  const factor = settings.fidelity === "clean" ? 0.3 : settings.fidelity === "preserve" ? 0.16 : 0.24;
+
+  for (let y = 2; y < height - 2; y += 1) {
+    for (let x = 2; x < width - 2; x += 1) {
+      const offset = (y * width + x) * 4;
+      const alpha = source[offset + 3];
+      let transparent = 0;
+      let strong = 0;
+      let alphaSum = 0;
+      let weightSum = 0;
+      for (let oy = -2; oy <= 2; oy += 1) {
+        for (let ox = -2; ox <= 2; ox += 1) {
+          const distance = Math.max(Math.abs(ox), Math.abs(oy));
+          const weight = distance === 0 ? 4 : distance === 1 ? 2 : 1;
+          const neighborAlpha = source[((y + oy) * width + x + ox) * 4 + 3];
+          if (neighborAlpha <= lowThreshold) transparent += 1;
+          if (neighborAlpha >= strongThreshold) strong += 1;
+          alphaSum += neighborAlpha * weight;
+          weightSum += weight;
+        }
+      }
+      if (transparent < 2 || strong < 2) continue;
+      const mixed = alphaSum / Math.max(1, weightSum);
+      if (alpha >= 246 && transparent >= 4 && strong <= 18) {
+        data[offset + 3] = Math.round(clamp(alpha * (1 - factor) + mixed * factor, 142, 224));
+      } else if (alpha <= lowThreshold && strong >= 3 && transparent <= 20) {
+        data[offset + 3] = Math.round(clamp(mixed * factor * 0.52, 0, 92));
+      } else if (alpha > lowThreshold && alpha < 246 && transparent >= 2 && strong >= 2) {
+        data[offset + 3] = Math.round(clamp(alpha * (1 - factor) + mixed * factor, 0, 255));
       }
     }
   }
