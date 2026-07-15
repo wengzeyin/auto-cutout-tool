@@ -8129,6 +8129,7 @@ function loopToCubicPath(loop, vectorSettings = {}) {
     const simplified = rdpSimplify([...points, points[0]], clamp((vectorSettings.simplify || 1.2) * 0.42, 0.42, 1.05));
     points = sameVectorPoint(simplified[0], simplified[simplified.length - 1]) ? simplified.slice(0, -1) : simplified;
   }
+  points = reduceSmoothRedundantPoints(points, vectorSettings);
   if (points.length < 4) return loopToPath(loop, { mode: "fast" });
   let d = `M${roundPathNumber(points[0][0])} ${roundPathNumber(points[0][1])}`;
   const tension = vectorSettings.protectLineArt ? 0.42 : 0.5;
@@ -8308,6 +8309,32 @@ function reduceLowCurvaturePoints(points, tolerance = 0.2, maxSpan = 14) {
       span <= maxSpan &&
       prevDistance > 0.01 &&
       nextDistance > 0.01 &&
+      perpendicularDistance(point, prev, next) <= tolerance
+    ) {
+      continue;
+    }
+    output.push(point);
+  }
+  return output.length >= 4 ? output : points;
+}
+
+function reduceSmoothRedundantPoints(points, vectorSettings = {}) {
+  if (points.length < 10) return points;
+  const tolerance = vectorSettings.protectLineArt ? 0.16 : 0.68;
+  const maxSpan = vectorSettings.protectLineArt ? 12 : 32;
+  const minNeighborDistance = vectorSettings.protectLineArt ? 0.64 : 0.86;
+  const output = [];
+  for (let index = 0; index < points.length; index += 1) {
+    const prev = points[(index - 1 + points.length) % points.length];
+    const point = points[index];
+    const next = points[(index + 1) % points.length];
+    const prevDistance = Math.hypot(point[0] - prev[0], point[1] - prev[1]);
+    const nextDistance = Math.hypot(next[0] - point[0], next[1] - point[1]);
+    const span = Math.hypot(next[0] - prev[0], next[1] - prev[1]);
+    if (
+      prevDistance >= minNeighborDistance &&
+      nextDistance >= minNeighborDistance &&
+      span <= maxSpan &&
       perpendicularDistance(point, prev, next) <= tolerance
     ) {
       continue;
