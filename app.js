@@ -3413,6 +3413,7 @@ function findMultiObjectComponents(imageData, alphaThreshold, minArea, pad, opti
   components = splitLargeComponents(components, imageData, coreMask, width, height, minCoreArea, pad, settings);
   components = stabilizeOverSplitComponents(components, imageData, coreMask, supportThreshold, minCoreArea, minArea, pad, settings);
   components = stabilizeTinyFragmentBurst(components, imageData, minArea, settings);
+  components = mergeNarrowSideFragments(components, imageData, minArea, settings);
 
   return sortComponentsReadingOrder(components)
     .map((component, index) => ({ ...component, id: index + 1, mask: undefined }));
@@ -3863,6 +3864,8 @@ function projectionSplit(component, imageData, coreMask, minCoreArea, pad, setti
   if (verticalValleys.length >= 2) return verticalValleys;
   const horizontalValleys = splitByProjectionValleys(component, imageData, coreMask, "y", minCoreArea, pad, settings);
   if (horizontalValleys.length >= 2) return horizontalValleys;
+  const pairedStack = splitPairedStackComponent(component, imageData, coreMask, minCoreArea, pad, settings);
+  if (pairedStack.length >= 2) return pairedStack;
   const repeatedStack = splitRepeatedStackComponent(component, imageData, coreMask, minCoreArea, pad, settings);
   if (repeatedStack.length >= 2) return repeatedStack;
   return splitStackedComponent(component, imageData, coreMask, minCoreArea, pad, settings);
@@ -4139,6 +4142,66 @@ function splitStackedComponent(component, imageData, coreMask, minCoreArea, pad,
   const parentArea = measureComponent(component, imageData, Math.max(24, settings.supportBase)).alphaArea;
   const childArea = children.reduce((sum, child) => sum + child.area, 0);
   return childArea >= parentArea * 0.68 ? children : [];
+}
+
+function splitPairedStackComponent(component, imageData, coreMask, minCoreArea, pad, settings) {
+  if ((settings.mergeDistance ?? 4) > 2) return [];
+  const aspect = component.height / Math.max(1, component.width);
+  if (aspect < 1.28 || aspect > 2.05 || component.height < 145 || component.width < 48) return [];
+
+  const { width, height } = imageData;
+  const startX = Math.max(0, Math.floor(component.x));
+  const startY = Math.max(0, Math.floor(component.y));
+  const endX = Math.min(width, Math.ceil(component.x + component.width));
+  const endY = Math.min(height, Math.ceil(component.y + component.height));
+  const length = endY - startY;
+  if (length < 120) return [];
+
+  const projection = new Array(length).fill(0);
+  for (let y = startY; y < endY; y += 1) {
+    for (let x = startX; x < endX; x += 1) {
+      if (coreMask[y * width + x]) projection[y - startY] += 1;
+    }
+  }
+  const smoothed = smoothProjection(projection, Math.max(3, Math.round(length * 0.018)));
+  const nonZero = smoothed.filter(Boolean);
+  if (nonZero.length < length * 0.52) return [];
+  const average = nonZero.reduce((sum, value) => sum + value, 0) / nonZero.length;
+  const max = Math.max(...smoothed);
+  if (!max || average < component.width * 0.16) return [];
+
+  const target = Math.round(length / 2);
+  const searchRadius = Math.max(18, Math.round(length * 0.18));
+  let cut = -1;
+  let valley = Infinity;
+  for (let cursor = Math.max(8, target - searchRadius); cursor <= Math.min(length - 8, target + searchRadius); cursor += 1) {
+    const value = smoothed[cursor] ?? 0;
+    if (value < valley) {
+      valley = value;
+      cut = cursor;
+    }
+  }
+  if (cut < 0) return [];
+  const peakWindow = Math.max(12, Math.round(length * 0.22));
+  const leftPeak = Math.max(...smoothed.slice(Math.max(0, cut - peakWindow), cut));
+  const rightPeak = Math.max(...smoothed.slice(cut + 1, Math.min(length, cut + peakWindow + 1)));
+  const localPeak = Math.min(leftPeak, rightPeak);
+  if (!localPeak || valley > Math.min(localPeak * 0.72, average * 0.92)) return [];
+
+  const ranges = [[0, cut], [cut, length]];
+  const children = componentsFromProjectionRanges(ranges, "y", { startX, startY, endX, endY }, imageData, coreMask, minCoreArea, pad, settings);
+  if (children.length !== 2) return [];
+
+  const parentMetrics = measureComponent(component, imageData, Math.max(24, settings.supportBase));
+  const childArea = children.reduce((sum, child) => sum + child.area, 0);
+  const childDensity = children.reduce((sum, child) => sum + child.alphaDensity, 0) / children.length;
+  const childHeights = children.map((child) => child.height);
+  const balance = Math.min(...childHeights) / Math.max(1, Math.max(...childHeights));
+  if (balance < 0.46) return [];
+  if (childArea < parentMetrics.alphaArea * 0.66) return [];
+  if (childDensity < parentMetrics.alphaDensity * 0.72) return [];
+  if (children.some((child) => child.alphaDensity < 0.16 || child.area < minCoreArea)) return [];
+  return children;
 }
 
 function splitRepeatedStackComponent(component, imageData, coreMask, minCoreArea, pad, settings) {
@@ -4579,6 +4642,55 @@ function stabilizeTinyFragmentBurst(components, imageData, minArea, settings = g
     after: compacted.length,
   };
   return compacted.map((component, index) => ({ ...component, id: index + 1 }));
+}
+
+function mergeNarrowSideFragments(components, imageData, minArea, settings = getSplitSettings()) {
+  if ((settings.mergeDistance ?? 4) > 2 || components.length < 2) return components;
+  const imageArea = imageData.width * imageData.height;
+  const alphaThreshold = Math.max(24, settings.supportBase || 22);
+  const measured = components.map((component) => measureBoxAsComponent(component, imageData, alphaThreshold));
+  const used = new Set();
+  const output = measured
+    .filter((component) => !isNarrowSideFragment(component, imageArea, minArea))
+    .map((component) => ({ ...component }));
+
+  for (const fragment of measured) {
+    if (!isNarrowSideFragment(fragment, imageArea, minArea)) continue;
+    const target = output
+      .map((candidate) => ({
+        candidate,
+        distance: boxDistance(fragment, candidate),
+        overlapY: axisOverlapRatio(fragment.y, fragment.height, candidate.y, candidate.height),
+        areaRatio: fragment.area / Math.max(1, candidate.area || 1),
+      }))
+      .filter((entry) => entry.overlapY >= 0.42)
+      .filter((entry) => entry.distance <= Math.max(18, Math.round(Math.sqrt(imageArea) * 0.026)))
+      .filter((entry) => entry.areaRatio <= 0.42)
+      .sort((a, b) => a.distance - b.distance)[0]?.candidate;
+    if (target) {
+      mergeBoxInto(target, fragment);
+      Object.assign(target, measureBoxAsComponent(target, imageData, alphaThreshold));
+      used.add(fragment);
+    }
+  }
+
+  for (const component of measured) {
+    if (!isNarrowSideFragment(component, imageArea, minArea) || used.has(component)) continue;
+    output.push(component);
+  }
+  return output;
+}
+
+function isNarrowSideFragment(component, imageArea, minArea) {
+  const minDimension = Math.min(component.width, component.height);
+  const maxDimension = Math.max(component.width, component.height);
+  const aspect = component.width / Math.max(1, component.height);
+  const smallEnough = component.area <= Math.max(minArea * 1.2, imageArea * 0.0028);
+  return smallEnough
+    && aspect < 0.34
+    && component.height >= 28
+    && minDimension <= Math.max(18, maxDimension * 0.34)
+    && component.alphaDensity >= 0.2;
 }
 
 function compactNearbySmallComponents(components, imageData, minArea, settings = getSplitSettings()) {

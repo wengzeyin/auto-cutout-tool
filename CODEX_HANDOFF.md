@@ -54,6 +54,7 @@ This file is for continuing the project from another Codex thread or device.
   - `Split five-sticker rows`
   - `Filter isolated SVG speckles`
   - `Add lightweight QA runner`
+  - `Split two-row sticker grids`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -89,6 +90,7 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
   - Completed next split stage after this note: horizontal repeated sticker-row splitting now runs before generic projection peaks, chooses better part counts from peak/valley balance, and guards against splitting continuous banners.
   - Completed next SVG cleanup stage after this note: isolated 3x3/4x4 transparent-background speckles are filtered from SVG output while 5x5 micro badges and protected line art remain.
   - Completed next QA regression stage after this note: `qa/run-lightweight-qa.mjs` now runs the full 14-test lightweight gate with per-test durations and a JSON summary.
+  - Completed next split stage after this note: two-row sticker grid columns now split into paired top/bottom stickers, with narrow side fragments merged back into the nearest sticker body.
   - Recommended next stage: tune real sticker-pack split behavior against more representative assets, or continue SVG path simplification at the curve/command-count layer.
 - The latest algorithm work has focused on making quality regressions measurable before changing more core behavior.
 - Current pushed head before this handoff note: `fdafacb Record SVG edge band QA`; latest local validation ran the full 15-image browser QA without changing the 15-image baseline score.
@@ -258,6 +260,15 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - The runner executes the current lightweight algorithm gate in one command: matte worker parity, matte refine, image type, multi-split, SVG vector, local ZIP, manual repair controls, AI timeout guard, solid-background fast cutout, report validation, report comparison, report metric coverage, runner health, and summary risk.
 - It prints one PASS/FAIL line per test with duration, includes stdout/stderr for failing tests, emits a JSON summary, and exits nonzero on any failure.
 - Validation on `2026-07-15`: `node --check qa/run-lightweight-qa.mjs` passed; `node qa/run-lightweight-qa.mjs` passed 14/14 tests in about 20 seconds.
+
+### Two-Row Sticker Grid Split - Done
+
+- Added a conservative paired-stack splitter for strong multi-sticker mode.
+- The splitter targets wide-ish vertical boxes that contain exactly two touching stickers, such as a 2x3 sticker pack where each column was previously merged into one tall element.
+- It validates the original vertical projection valley, requires two dense balanced children, and keeps the broader continuous-subject guards unchanged.
+- Added a final narrow-side-fragment merge so small side lobes created during the paired split are merged back into the nearest sticker body instead of becoming separate assets.
+- Added `touching-two-row-sticker-grid` regression coverage in `qa/test-multi-split.mjs`; expected output is exactly 6 components.
+- Validation on `2026-07-15`: syntax checks passed; `node qa/test-multi-split.mjs` passed including two-row grid, five-sticker row, vertical stack, micro-badge, and continuous-subject guards; `node qa/run-lightweight-qa.mjs` passed 14/14 tests in about 20 seconds.
 
 ## Already Implemented Before UI Pass
 
