@@ -50,6 +50,7 @@ This file is for continuing the project from another Codex thread or device.
   - `Simplify SVG fill path anchors`
   - `Track SVG cubic handle QA metric`
   - `Align matte worker product edge polish`
+  - `Guard manual repair controls`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -81,6 +82,7 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
   - Completed next SVG stage after this note: precise SVG path smoothing now protects only actual dark/gray line-art groups and simplifies low-curvature fill anchors after smoothing.
   - Completed next QA stage after this note: generated QA reports now track `svgCubicHandleOutlierRatio`, validate it, compare it against baselines, and require real-report coverage.
   - Completed next matte consistency stage after this note: the matte worker path now runs product diagonal edge polish in the same order as the main-thread fallback.
+  - Completed next designer-usability QA stage after this note: static QA now guards the manual repair controls for split, merge, add-box, adjust-box, and export-selection workflows.
   - Recommended next stage: tune real sticker-pack split behavior against more representative assets, or continue SVG path simplification at the curve/command-count layer.
 - The latest algorithm work has focused on making quality regressions measurable before changing more core behavior.
 - Current pushed head before this handoff note: `fdafacb Record SVG edge band QA`; latest local validation ran the full 15-image browser QA without changing the 15-image baseline score.
@@ -218,6 +220,13 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - This ensures product diagonal/stair-step edge polish is applied consistently whether the browser uses the worker path or the fallback main-thread path.
 - Added `qa/test-matte-worker-parity.mjs` to assert the worker keeps the product edge polish function and pipeline order.
 - Validation on `2026-07-15`: syntax checks passed; matte worker parity, matte refine, image-type, multi-split, SVG vector, local ZIP, AI timeout guard, solid-background fast-cutout, report validation, report compare, report metric coverage, runner health, and summary risk QA all passed locally.
+
+### Manual Repair Control QA - Done
+
+- Added `qa/test-manual-repair-controls.mjs`.
+- The test guards the designer fallback controls and wiring for splitting a selected element, merging selected elements, saving a manual selection as a new element, updating a selected element box, and exporting the current manual selection.
+- The guard checks `index.html` controls, `app.js` element bindings, event bindings, workflow functions, and key persistence/renumbering invariants.
+- Validation on `2026-07-15`: manual repair control QA passed; matte worker parity, matte refine, image-type, multi-split, SVG vector, local ZIP, AI timeout guard, solid-background fast-cutout, report validation, report compare, report metric coverage, runner health, and summary risk QA all passed locally.
 
 ## Already Implemented Before UI Pass
 
@@ -444,6 +453,8 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
   - `node qa/test-image-type.mjs`
   - `node qa/test-multi-split.mjs`
   - `node qa/test-svg-vector.mjs`
+  - `node qa/test-matte-worker-parity.mjs`
+  - `node qa/test-manual-repair-controls.mjs`
   - `node qa/test-ai-timeout-guard.mjs`
   - `node qa/test-local-zip.mjs`
   - `node qa/test-validate-report.mjs`
