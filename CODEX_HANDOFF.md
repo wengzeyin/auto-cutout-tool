@@ -57,6 +57,7 @@ This file is for continuing the project from another Codex thread or device.
   - `Split two-row sticker grids`
   - `Restore faint transparent highlights`
   - `Reduce smooth SVG path commands`
+  - `Split staggered sticker packs`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -95,6 +96,7 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
   - Completed next QA regression stage after this note: `qa/run-lightweight-qa.mjs` now runs the full 14-test lightweight gate with per-test durations and a JSON summary.
   - Completed next split stage after this note: two-row sticker grid columns now split into paired top/bottom stickers, with narrow side fragments merged back into the nearest sticker body.
   - Completed next SVG path-quality stage after this note: precise SVG cubic paths now run a final short-span redundant point reduction, lowering the simple flat-art command count from `166` to `133` while preserving cubic output, subpixel coordinates, line art, micro badges, and speckle filtering.
+  - Completed next split stage after this note: strong multi-sticker mode now has sparse strong-seed splitting for staggered sticker packs with small props. The new regression splits a realistic staggered pack from `3` merged large boxes into `10` elements while keeping the single-character internal-gap guard at `1`.
   - Recommended next stage: tune real sticker-pack split behavior against more representative assets, or continue SVG path simplification at the curve/command-count layer.
 - The latest algorithm work has focused on making quality regressions measurable before changing more core behavior.
 - Current pushed head before this handoff note: `fdafacb Record SVG edge band QA`; latest local validation ran the full 15-image browser QA without changing the 15-image baseline score.

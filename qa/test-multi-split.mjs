@@ -229,6 +229,29 @@ const cases = [
     max: 6,
   },
   {
+    name: "staggered-realistic-sticker-pack-with-props",
+    draw: (img) => {
+      const positions = [
+        [145, 92], [355, 108], [570, 88],
+        [230, 228], [462, 238], [690, 222],
+      ];
+      for (const [cx, cy] of positions) {
+        ellipse(img, cx, cy, 52, 58, 255);
+        rect(img, cx - 35, cy + 48, 70, 44, 248);
+        ellipse(img, cx - 42, cy + 36, 16, 20, 245);
+        ellipse(img, cx + 40, cy + 34, 15, 19, 245);
+        ellipse(img, cx, cy + 96, 64, 14, 38);
+      }
+      for (const [x, y] of [[260, 120], [494, 128], [592, 246], [350, 260]]) {
+        rect(img, x, y, 10, 10, 255);
+      }
+      rect(img, 86, 292, 690, 14, 30);
+      rect(img, 176, 184, 530, 6, 26);
+    },
+    min: 10,
+    max: 10,
+  },
+  {
     name: "large-box-projection-split-clear-gaps",
     draw: (img) => {
       for (const cx of [185, 450, 715]) {
@@ -541,6 +564,8 @@ function splitLargeComponent(component, imageData, coreMask, w, h, minCoreArea, 
   const coreChildren = findCoreSeedsInBox(coreMask, w, h, component, minCoreArea);
   const hasMultipleCore = coreChildren.length >= 2;
   if (!largeBySize && !sparseLarge && !hasMultipleCore) return [];
+  const sparseSeedChildren = splitSparseStrongSeedComponent(component, imageData, coreChildren, minCoreArea, pad, settings);
+  if (sparseSeedChildren.length >= 2) return sparseSeedChildren;
   const ownershipChildren = splitBySeedOwnership(component, imageData, coreChildren, minCoreArea, pad, settings);
   if (ownershipChildren.length >= 2) return ownershipChildren;
   const projectionChildren = projectionSplit(component, imageData, coreMask, minCoreArea, pad, settings);
@@ -556,6 +581,38 @@ function splitLargeComponent(component, imageData, coreMask, w, h, minCoreArea, 
       return measureBoxAsComponent({ id: child.id, x: padded.minX, y: padded.minY, width: padded.maxX - padded.minX + 1, height: padded.maxY - padded.minY + 1 }, imageData, Math.max(24, settings.supportBase));
     })
     .filter((child) => keepMultiObjectComponent(child, imageArea, minCoreArea));
+}
+
+function splitSparseStrongSeedComponent(component, imageData, coreChildren, minCoreArea, pad, settings) {
+  if ((settings.mergeDistance ?? 4) > 2 || !coreChildren || coreChildren.length < 2 || coreChildren.length > 14) return [];
+  const { width: w, height: h } = imageData;
+  const imageArea = w * h;
+  const parentMetrics = measureComponent(component, imageData, Math.max(24, settings.supportBase));
+  if (parentMetrics.alphaDensity > 0.34 && parentMetrics.boxRatio < 0.18) return [];
+  const seeds = coreChildren
+    .filter((child) => child.area >= minCoreArea || isClearTinyCoreSeed(child.area, child.x, child.y, child.x + child.width - 1, child.y + child.height - 1, minCoreArea));
+  if (seeds.length < 2) return [];
+  const minCenterX = Math.min(...seeds.map((seed) => seed.x + seed.width / 2));
+  const maxCenterX = Math.max(...seeds.map((seed) => seed.x + seed.width / 2));
+  const minCenterY = Math.min(...seeds.map((seed) => seed.y + seed.height / 2));
+  const maxCenterY = Math.max(...seeds.map((seed) => seed.y + seed.height / 2));
+  const spanX = (maxCenterX - minCenterX) / Math.max(1, component.width);
+  const spanY = (maxCenterY - minCenterY) / Math.max(1, component.height);
+  if (spanX < 0.18 || spanY < 0.22) return [];
+  const splitPad = Math.max(1, Math.round(pad * Math.min(settings.splitPaddingFactor ?? 0.8, 0.5)));
+  const children = seeds
+    .map((seed, index) => {
+      const padded = padBox({ minX: seed.x, minY: seed.y, maxX: seed.x + seed.width - 1, maxY: seed.y + seed.height - 1 }, splitPad, w, h);
+      return measureBoxAsComponent({ id: index + 1, x: padded.minX, y: padded.minY, width: padded.maxX - padded.minX + 1, height: padded.maxY - padded.minY + 1 }, imageData, Math.max(24, settings.supportBase));
+    })
+    .filter((child) => keepMultiObjectComponent(child, imageArea, minCoreArea));
+  if (children.length < 2) return [];
+  const childArea = children.reduce((sum, child) => sum + (child.area || 0), 0);
+  const strongArea = coreChildren.reduce((sum, child) => sum + child.area, 0);
+  const denseChildren = children.filter((child) => child.alphaDensity >= 0.28 || hasCompactTinyCoreComponent(child, imageArea, minCoreArea)).length;
+  if (denseChildren !== children.length) return [];
+  if (childArea < Math.max(strongArea * 0.9, parentMetrics.alphaArea * 0.34)) return [];
+  return sortComponentsReadingOrder(children);
 }
 
 function splitDetachedSmallSeedComponent(component, imageData, coreChildren, minCoreArea, pad, settings) {
@@ -1552,7 +1609,7 @@ function stabilizeOverSplitComponents(components, imageData, coreMask, supportTh
   });
   grouped = mergeAssetFragments(grouped, imageData, Math.max(24, supportThreshold), {
     ...settings,
-    mergeDistance: Math.max(settings.mergeDistance ?? 4, 5),
+    mergeDistance: (settings.mergeDistance ?? 4) <= 2 ? settings.mergeDistance : Math.max(settings.mergeDistance ?? 4, 5),
   });
   grouped = grouped.filter((component) => keepMultiObjectComponent(component, imageArea, minArea));
   if (grouped.length < 2 || grouped.length > Math.max(32, components.length * 0.85)) return components;
