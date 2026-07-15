@@ -52,6 +52,7 @@ This file is for continuing the project from another Codex thread or device.
   - `Align matte worker product edge polish`
   - `Guard manual repair controls`
   - `Split five-sticker rows`
+  - `Filter isolated SVG speckles`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -85,6 +86,7 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
   - Completed next matte consistency stage after this note: the matte worker path now runs product diagonal edge polish in the same order as the main-thread fallback.
   - Completed next designer-usability QA stage after this note: static QA now guards the manual repair controls for split, merge, add-box, adjust-box, and export-selection workflows.
   - Completed next split stage after this note: horizontal repeated sticker-row splitting now runs before generic projection peaks, chooses better part counts from peak/valley balance, and guards against splitting continuous banners.
+  - Completed next SVG cleanup stage after this note: isolated 3x3/4x4 transparent-background speckles are filtered from SVG output while 5x5 micro badges and protected line art remain.
   - Recommended next stage: tune real sticker-pack split behavior against more representative assets, or continue SVG path simplification at the curve/command-count layer.
 - The latest algorithm work has focused on making quality regressions measurable before changing more core behavior.
 - Current pushed head before this handoff note: `fdafacb Record SVG edge band QA`; latest local validation ran the full 15-image browser QA without changing the 15-image baseline score.
@@ -238,6 +240,15 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - Added `five-touching-wide-stickers` regression coverage in `qa/test-multi-split.mjs`; expected output is exactly 5 components.
 - Added `continuous-wide-banner-not-row-split` as an over-split guard; expected output is exactly 1 component.
 - Validation on `2026-07-15`: syntax checks passed; multi-split, matte worker parity, matte refine, image-type, SVG vector, local ZIP, manual repair controls, AI timeout guard, solid-background fast-cutout, report validation, report compare, report metric coverage, runner health, and summary risk QA all passed locally.
+
+### Isolated SVG Speckle Filtering - Done
+
+- Added `isIsolatedVectorSpeckle()` in the SVG region export path.
+- The filter removes tiny isolated regions on transparent background up to 4x4 pixels, reducing stray editable paths from noisy sticker/icon exports.
+- Protected dark/gray line art is exempt, and dense 5x5+ micro design details are kept so intentional small badges do not disappear.
+- Added `makeIsolatedSpeckleStickerImageData()` regression coverage in `qa/test-svg-vector.mjs`.
+- The SVG regression now asserts isolated tiny noise groups are 0, the 5x5 blue micro badge survives with area 25, dark line art survives with area 860, and the speckled fixture stays at 10 paths or fewer.
+- Validation on `2026-07-15`: syntax checks passed; SVG vector, matte worker parity, matte refine, image-type, multi-split, local ZIP, manual repair controls, AI timeout guard, solid-background fast-cutout, report validation, report compare, report metric coverage, runner health, and summary risk QA all passed locally.
 
 ## Already Implemented Before UI Pass
 

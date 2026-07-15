@@ -7403,10 +7403,24 @@ function imageDataToVectorRegions(imageData, alphaThreshold, vectorSettings = ge
   const finalRegions = collectVectorRegions(keys, width, height);
   for (const region of finalRegions) {
     if (region.pixels.length < minRegionArea) continue;
+    if (isIsolatedVectorSpeckle(region, keys, width, height, vectorSettings, mergeTinyArea)) continue;
     appendVectorRegion(groups, region.key, region.pixels, keys, width, height, vectorSettings);
   }
 
   return groups;
+}
+
+function isIsolatedVectorSpeckle(region, keys, width, height, vectorSettings = {}, mergeTinyArea = 4) {
+  const maxSpeckleArea = Math.max(16, Math.round(mergeTinyArea * 4));
+  if (!region?.pixels?.length || region.pixels.length > maxSpeckleArea) return false;
+  if (vectorSettings.protectLineArt && isDarkVectorKey(region.key)) return false;
+  const bounds = vectorRegionBounds(region.pixels, width);
+  const boxWidth = bounds.maxX - bounds.minX + 1;
+  const boxHeight = bounds.maxY - bounds.minY + 1;
+  const minDimension = Math.min(boxWidth, boxHeight);
+  const density = region.pixels.length / Math.max(1, boxWidth * boxHeight);
+  if (region.pixels.length >= 18 && minDimension >= 5 && density >= 0.52) return false;
+  return vectorRegionBoundaryContact(region.pixels, keys, width, height, region.key) === 0;
 }
 
 function mergeVectorEmbeddedColorRegions(keys, width, height, vectorSettings = {}, mergeTinyArea = 4) {

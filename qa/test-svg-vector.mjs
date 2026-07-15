@@ -211,6 +211,32 @@ if (flatShadeGreenGroups.length > 2) failures.push(`Expected low-contrast flat s
 if (flatShadeProtectedDarkArea < 100) failures.push(`Expected flat-shade dark line art to remain, got area ${flatShadeProtectedDarkArea}.`);
 if (flatShadePathCount > 5) failures.push(`Expected flat-shade SVG to merge low-contrast patch paths, got ${flatShadePathCount}.`);
 
+const speckledSticker = makeIsolatedSpeckleStickerImageData(260, 190);
+const speckledGroups = imageDataToVectorRegions(speckledSticker, 8, {
+  mode: "precise",
+  colorStep: 18,
+  minRegionRatio: 0.00001,
+  mergeTinyRatio: 0.00002,
+  simplify: 1.15,
+  smoothPasses: 2,
+  protectLineArt: true,
+  flattenAlpha: true,
+});
+const speckledPathCount = [...speckledGroups.values()].reduce((sum, group) => sum + group.regionCount, 0);
+const speckledTinyNoiseGroups = [...speckledGroups.entries()]
+  .filter(([, group]) => group.area >= 5 && group.area <= 16)
+  .length;
+const speckledMicroBadge = [...speckledGroups.entries()]
+  .find(([key, group]) => keyIsBlue(key) && group.area >= 18 && group.area <= 40)?.[1];
+const speckledDarkLineArea = [...speckledGroups.entries()]
+  .filter(([key]) => /^#/.test(key) && keyLightness(key) < 80)
+  .reduce((sum, [, group]) => sum + group.area, 0);
+
+if (speckledTinyNoiseGroups > 0) failures.push(`Expected isolated tiny SVG speckles to be filtered, got ${speckledTinyNoiseGroups}.`);
+if (!speckledMicroBadge || speckledMicroBadge.area < 18) failures.push("Expected clear 5px micro badge to survive isolated-speckle filtering.");
+if (speckledDarkLineArea < 60) failures.push(`Expected dark line art to survive isolated-speckle filtering, got area ${speckledDarkLineArea}.`);
+if (speckledPathCount > 10) failures.push(`Expected speckled sticker SVG to avoid noisy extra paths, got ${speckledPathCount}.`);
+
 const result = {
   pathCount,
   commandCount,
@@ -249,6 +275,10 @@ const result = {
   flatShadeGreenGroups: flatShadeGreenGroups.length,
   flatShadeProtectedDarkArea,
   flatShadePathCount,
+  speckledPathCount,
+  speckledTinyNoiseGroups,
+  speckledMicroBadgeArea: speckledMicroBadge?.area || 0,
+  speckledDarkLineArea,
   pass: failures.length === 0,
   failures,
 };
@@ -387,6 +417,20 @@ function makeFlatShadePatchBadgeImageData(width, height) {
   return img;
 }
 
+function makeIsolatedSpeckleStickerImageData(width, height) {
+  const img = makeImageData(width, height);
+  roundRect(img, 54, 38, 150, 108, 28, [52, 199, 134, 255]);
+  ellipse(img, 130, 92, 34, 24, [252, 252, 250, 255]);
+  rect(img, 92, 126, 76, 5, [18, 24, 38, 255]);
+  rect(img, 108, 72, 5, 48, [18, 24, 38, 255]);
+  rect(img, 150, 72, 5, 48, [18, 24, 38, 255]);
+  rect(img, 26, 28, 3, 3, [239, 68, 68, 255]);
+  rect(img, 218, 34, 3, 3, [250, 204, 21, 255]);
+  rect(img, 228, 156, 4, 4, [244, 114, 182, 255]);
+  rect(img, 28, 156, 5, 5, [37, 99, 235, 255]);
+  return img;
+}
+
 function seededNoise(index, salt) {
   const value = Math.sin(index * 127.1 + salt * 311.7) * 43758.5453123;
   return value - Math.floor(value);
@@ -421,9 +465,23 @@ function imageDataToVectorRegions(imageData, alphaThreshold, vectorSettings) {
   const finalRegions = collectVectorRegions(keys, width, height);
   for (const region of finalRegions) {
     if (region.pixels.length < minRegionArea) continue;
+    if (isIsolatedVectorSpeckle(region, keys, width, height, vectorSettings, mergeTinyArea)) continue;
     appendVectorRegion(groups, region.key, region.pixels, keys, width, height, vectorSettings);
   }
   return groups;
+}
+
+function isIsolatedVectorSpeckle(region, keys, width, height, vectorSettings = {}, mergeTinyArea = 4) {
+  const maxSpeckleArea = Math.max(16, Math.round(mergeTinyArea * 4));
+  if (!region?.pixels?.length || region.pixels.length > maxSpeckleArea) return false;
+  if (vectorSettings.protectLineArt && isDarkVectorKey(region.key)) return false;
+  const bounds = vectorRegionBounds(region.pixels, width);
+  const boxWidth = bounds.maxX - bounds.minX + 1;
+  const boxHeight = bounds.maxY - bounds.minY + 1;
+  const minDimension = Math.min(boxWidth, boxHeight);
+  const density = region.pixels.length / Math.max(1, boxWidth * boxHeight);
+  if (region.pixels.length >= 18 && minDimension >= 5 && density >= 0.52) return false;
+  return vectorRegionBoundaryContact(region.pixels, keys, width, height, region.key) === 0;
 }
 
 function mergeVectorEmbeddedColorRegions(keys, width, height, vectorSettings = {}, mergeTinyArea = 4) {
