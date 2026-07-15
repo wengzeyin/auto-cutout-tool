@@ -176,6 +176,19 @@ const cases = [
     max: 9,
   },
   {
+    name: "touching-horizontal-sticker-row",
+    draw: (img) => {
+      for (let col = 0; col < 4; col += 1) {
+        const cx = 150 + col * 150;
+        ellipse(img, cx, 170, 52, 64, 255);
+        ellipse(img, cx + 54, 170, 30, 46, 244);
+        ellipse(img, cx, 234, 48, 20, 242);
+      }
+    },
+    min: 4,
+    max: 4,
+  },
+  {
     name: "large-box-projection-split-clear-gaps",
     draw: (img) => {
       for (const cx of [185, 450, 715]) {
@@ -648,6 +661,8 @@ function projectionSplit(component, imageData, coreMask, minCoreArea, pad, setti
   if (verticalValleys.length >= 2) return verticalValleys;
   const horizontalValleys = splitByProjectionValleys(component, imageData, coreMask, "y", minCoreArea, pad, settings);
   if (horizontalValleys.length >= 2) return horizontalValleys;
+  const repeatedRow = splitRepeatedRowComponent(component, imageData, coreMask, minCoreArea, pad, settings);
+  if (repeatedRow.length >= 2) return repeatedRow;
   const repeatedStack = splitRepeatedStackComponent(component, imageData, coreMask, minCoreArea, pad, settings);
   if (repeatedStack.length >= 2) return repeatedStack;
   return splitStackedComponent(component, imageData, coreMask, minCoreArea, pad, settings);
@@ -949,6 +964,67 @@ function splitRepeatedStackComponent(component, imageData, coreMask, minCoreArea
   }
   ranges.push([last, length]);
   const children = componentsFromProjectionRanges(ranges, "y", { startX, startY, endX, endY }, imageData, coreMask, minCoreArea, pad, settings);
+  if (children.length !== estimatedParts) return [];
+  const parentArea = measureComponent(component, imageData, Math.max(24, settings.supportBase)).alphaArea;
+  const childArea = children.reduce((sum, child) => sum + child.area, 0);
+  const denseChildren = children.filter((child) => child.alphaDensity >= 0.18 && child.area >= minCoreArea).length;
+  if (denseChildren !== children.length || childArea < parentArea * 0.7) return [];
+  return children;
+}
+
+function splitRepeatedRowComponent(component, imageData, coreMask, minCoreArea, pad, settings) {
+  if ((settings.mergeDistance ?? 4) > 2) return [];
+  const aspect = component.width / Math.max(1, component.height);
+  if (aspect < 2.8 || component.width < 160 || component.height < 24) return [];
+  const estimatedParts = clamp(Math.round(aspect), 2, 6);
+  if (estimatedParts < 2) return [];
+  const { width: w, height: h } = imageData;
+  const startX = Math.max(0, Math.floor(component.x));
+  const startY = Math.max(0, Math.floor(component.y));
+  const endX = Math.min(w, Math.ceil(component.x + component.width));
+  const endY = Math.min(h, Math.ceil(component.y + component.height));
+  const length = endX - startX;
+  if (length < 130) return [];
+  const projection = new Array(length).fill(0);
+  for (let y = startY; y < endY; y += 1) {
+    for (let x = startX; x < endX; x += 1) {
+      if (coreMask[y * w + x]) projection[x - startX] += 1;
+    }
+  }
+  const smoothed = smoothProjection(projection, Math.max(3, Math.round(length * 0.018)));
+  const nonZero = smoothed.filter(Boolean);
+  if (nonZero.length < length * 0.56) return [];
+  const average = nonZero.reduce((sum, value) => sum + value, 0) / nonZero.length;
+  const max = Math.max(...smoothed);
+  if (!max || average < component.height * 0.18) return [];
+  const cuts = [];
+  const partWidth = length / estimatedParts;
+  const searchRadius = Math.max(12, Math.round(partWidth * 0.32));
+  for (let part = 1; part < estimatedParts; part += 1) {
+    const target = Math.round(partWidth * part);
+    let bestIndex = -1;
+    let bestValue = Infinity;
+    for (let cursor = Math.max(6, target - searchRadius); cursor <= Math.min(length - 6, target + searchRadius); cursor += 1) {
+      const value = smoothed[cursor] ?? 0;
+      if (value < bestValue) {
+        bestValue = value;
+        bestIndex = cursor;
+      }
+    }
+    if (bestIndex < 0) continue;
+    const isRealValley = bestValue <= max * 0.94 || bestValue <= average * 1.08;
+    const farFromPrevious = !cuts.length || bestIndex - cuts[cuts.length - 1] >= partWidth * 0.45;
+    if (isRealValley && farFromPrevious) cuts.push(bestIndex);
+  }
+  if (cuts.length < estimatedParts - 1) return [];
+  const ranges = [];
+  let last = 0;
+  for (const cut of cuts) {
+    ranges.push([last, cut]);
+    last = cut;
+  }
+  ranges.push([last, length]);
+  const children = componentsFromProjectionRanges(ranges, "x", { startX, startY, endX, endY }, imageData, coreMask, minCoreArea, pad, settings);
   if (children.length !== estimatedParts) return [];
   const parentArea = measureComponent(component, imageData, Math.max(24, settings.supportBase)).alphaArea;
   const childArea = children.reduce((sum, child) => sum + child.area, 0);
