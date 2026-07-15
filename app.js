@@ -7026,6 +7026,7 @@ function imageDataToVectorRegions(imageData, alphaThreshold, vectorSettings = ge
 
   stabilizeVectorColorKeys(keys, width, height, vectorSettings);
   closeVectorMicroGaps(keys, width, height, vectorSettings);
+  mergeVectorEmbeddedColorRegions(keys, width, height, vectorSettings, mergeTinyArea);
   mergeVectorEdgeBands(keys, width, height, vectorSettings, mergeTinyArea);
 
   const finalRegions = collectVectorRegions(keys, width, height);
@@ -7035,6 +7036,34 @@ function imageDataToVectorRegions(imageData, alphaThreshold, vectorSettings = ge
   }
 
   return groups;
+}
+
+function mergeVectorEmbeddedColorRegions(keys, width, height, vectorSettings = {}, mergeTinyArea = 4) {
+  if (vectorSettings.mode === "fast" || (!vectorSettings.flattenAlpha && vectorSettings.mode !== "precise")) return;
+  const totalArea = width * height;
+  const maxEmbeddedArea = Math.max(mergeTinyArea * 24, Math.round(totalArea * (vectorSettings.embeddedMergeRatio || 0.008)));
+  for (let pass = 0; pass < 2; pass += 1) {
+    let changed = 0;
+    const regions = collectVectorRegions(keys, width, height);
+    for (const region of regions) {
+      if (region.pixels.length <= mergeTinyArea || region.pixels.length > maxEmbeddedArea) continue;
+      if (vectorSettings.protectLineArt && isDarkVectorKey(region.key)) continue;
+
+      const neighbor = dominantNeighborVectorKey(region.pixels, keys, width, height, region.key);
+      if (!neighbor?.key) continue;
+      if (vectorSettings.protectLineArt && isDarkVectorKey(neighbor.key)) continue;
+      if (!vectorKeysCloseForEmbeddedMerge(region.key, neighbor.key, vectorSettings)) continue;
+
+      const boundaryContact = vectorRegionBoundaryContact(region.pixels, keys, width, height, region.key);
+      const dominantBoundaryRatio = neighbor.count / Math.max(1, boundaryContact);
+      const sizeSupport = neighbor.count / Math.max(1, Math.sqrt(region.pixels.length));
+      if (dominantBoundaryRatio < 0.58 || sizeSupport < 1.35) continue;
+
+      for (const pixel of region.pixels) keys[pixel] = neighbor.key;
+      changed += 1;
+    }
+    if (!changed) break;
+  }
 }
 
 function mergeVectorEdgeBands(keys, width, height, vectorSettings = {}, mergeTinyArea = 4) {
@@ -7103,6 +7132,25 @@ function dominantNeighborVectorKey(pixels, keys, width, height, ownKey) {
   return key ? { key, count } : null;
 }
 
+function vectorRegionBoundaryContact(pixels, keys, width, height, ownKey) {
+  let contact = 0;
+  for (const index of pixels) {
+    const x = index % width;
+    const y = Math.floor(index / width);
+    const neighbors = [
+      x > 0 ? index - 1 : -1,
+      x < width - 1 ? index + 1 : -1,
+      y > 0 ? index - width : -1,
+      y < height - 1 ? index + width : -1,
+    ];
+    for (const next of neighbors) {
+      const key = next >= 0 ? keys[next] : null;
+      if (key && key !== ownKey) contact += 1;
+    }
+  }
+  return contact;
+}
+
 function vectorKeysCloseForBandMerge(keyA, keyB, vectorSettings = {}) {
   const rgbA = vectorKeyRgb(keyA);
   const rgbB = vectorKeyRgb(keyB);
@@ -7116,6 +7164,20 @@ function vectorKeysCloseForBandMerge(keyA, keyB, vectorSettings = {}) {
     && Math.abs(rgbA[2] - rgbB[2]) < 62
     && Math.abs(metricsA.saturation - metricsB.saturation) < 0.22;
   return similarHue && Math.abs(metricsA.lightness - metricsB.lightness) < 54;
+}
+
+function vectorKeysCloseForEmbeddedMerge(keyA, keyB, vectorSettings = {}) {
+  const rgbA = vectorKeyRgb(keyA);
+  const rgbB = vectorKeyRgb(keyB);
+  if (!rgbA || !rgbB) return false;
+  const metricsA = colorMetrics(rgbA[0], rgbA[1], rgbA[2]);
+  const metricsB = colorMetrics(rgbB[0], rgbB[1], rgbB[2]);
+  if (vectorSettings.protectLineArt && (isProtectedVectorLineArt(metricsA) || isProtectedVectorLineArt(metricsB))) return false;
+  const distance = Math.sqrt(((rgbA[0] - rgbB[0]) ** 2 + (rgbA[1] - rgbB[1]) ** 2 + (rgbA[2] - rgbB[2]) ** 2) / 3);
+  if (distance <= 34) return true;
+  return distance <= 46
+    && Math.abs(metricsA.lightness - metricsB.lightness) < 28
+    && Math.abs(metricsA.saturation - metricsB.saturation) < 0.16;
 }
 
 function vectorKeyRgb(key = "") {

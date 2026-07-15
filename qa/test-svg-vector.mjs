@@ -161,6 +161,33 @@ if (edgeBandGreenGroups.length > 1) failures.push(`Expected adjacent green anti-
 if (edgeBandProtectedDarkArea < 70) failures.push(`Expected protected dark line art to survive edge-band merging, got area ${edgeBandProtectedDarkArea}.`);
 if (edgeBandPathCount > 8) failures.push(`Expected edge-band SVG to avoid line-like extra paths, got ${edgeBandPathCount}.`);
 
+const embeddedPatchBadge = makeEmbeddedPatchBadgeImageData(240, 180);
+const embeddedPatchGroups = imageDataToVectorRegions(embeddedPatchBadge, 8, {
+  mode: "precise",
+  colorStep: 18,
+  minRegionRatio: 0.00001,
+  mergeTinyRatio: 0.00002,
+  simplify: 1.15,
+  smoothPasses: 2,
+  protectLineArt: true,
+  flattenAlpha: true,
+});
+const embeddedPatchGreenGroups = [...embeddedPatchGroups.entries()]
+  .filter(([key]) => keyIsGreen(key))
+  .map(([, group]) => group);
+const embeddedPatchProtectedDarkArea = [...embeddedPatchGroups.entries()]
+  .filter(([key]) => /^#/.test(key) && keyLightness(key) < 80)
+  .reduce((sum, [, group]) => sum + group.area, 0);
+const embeddedPatchProtectedGrayArea = [...embeddedPatchGroups.entries()]
+  .filter(([key]) => /^#/.test(key) && keyLightness(key) >= 96 && keyLightness(key) < 150 && keySaturation(key) < 0.08)
+  .reduce((sum, [, group]) => sum + group.area, 0);
+const embeddedPatchPathCount = [...embeddedPatchGroups.values()].reduce((sum, group) => sum + group.regionCount, 0);
+
+if (embeddedPatchGreenGroups.length > 1) failures.push(`Expected embedded near-color green patches to merge into 1 editable fill group, got ${embeddedPatchGreenGroups.length}.`);
+if (embeddedPatchProtectedDarkArea < 120) failures.push(`Expected embedded-patch dark line art to remain, got area ${embeddedPatchProtectedDarkArea}.`);
+if (embeddedPatchProtectedGrayArea < 80) failures.push(`Expected embedded-patch gray line art to remain, got area ${embeddedPatchProtectedGrayArea}.`);
+if (embeddedPatchPathCount > 6) failures.push(`Expected embedded-patch SVG to avoid extra patch paths, got ${embeddedPatchPathCount}.`);
+
 const result = {
   pathCount,
   commandCount,
@@ -192,6 +219,10 @@ const result = {
   edgeBandGreenGroups: edgeBandGreenGroups.length,
   edgeBandProtectedDarkArea,
   edgeBandPathCount,
+  embeddedPatchGreenGroups: embeddedPatchGreenGroups.length,
+  embeddedPatchProtectedDarkArea,
+  embeddedPatchProtectedGrayArea,
+  embeddedPatchPathCount,
   pass: failures.length === 0,
   failures,
 };
@@ -307,6 +338,18 @@ function makeEdgeBandBadgeImageData(width, height) {
   return img;
 }
 
+function makeEmbeddedPatchBadgeImageData(width, height) {
+  const img = makeImageData(width, height);
+  roundRect(img, 56, 40, 128, 96, 24, [52, 199, 134, 255]);
+  rect(img, 82, 68, 18, 12, [72, 210, 150, 255]);
+  rect(img, 132, 92, 16, 10, [70, 212, 150, 255]);
+  rect(img, 78, 112, 72, 4, [18, 24, 38, 255]);
+  rect(img, 96, 70, 5, 42, [18, 24, 38, 255]);
+  rect(img, 134, 70, 5, 42, [18, 24, 38, 255]);
+  rect(img, 82, 119, 70, 2, [112, 112, 112, 210]);
+  return img;
+}
+
 function seededNoise(index, salt) {
   const value = Math.sin(index * 127.1 + salt * 311.7) * 43758.5453123;
   return value - Math.floor(value);
@@ -335,6 +378,7 @@ function imageDataToVectorRegions(imageData, alphaThreshold, vectorSettings) {
   }
   stabilizeVectorColorKeys(keys, width, height, vectorSettings);
   closeVectorMicroGaps(keys, width, height, vectorSettings);
+  mergeVectorEmbeddedColorRegions(keys, width, height, vectorSettings, mergeTinyArea);
   mergeVectorEdgeBands(keys, width, height, vectorSettings, mergeTinyArea);
   const finalRegions = collectVectorRegions(keys, width, height);
   for (const region of finalRegions) {
@@ -342,6 +386,31 @@ function imageDataToVectorRegions(imageData, alphaThreshold, vectorSettings) {
     appendVectorRegion(groups, region.key, region.pixels, keys, width, height, vectorSettings);
   }
   return groups;
+}
+
+function mergeVectorEmbeddedColorRegions(keys, width, height, vectorSettings = {}, mergeTinyArea = 4) {
+  if (vectorSettings.mode === "fast" || (!vectorSettings.flattenAlpha && vectorSettings.mode !== "precise")) return;
+  const totalArea = width * height;
+  const maxEmbeddedArea = Math.max(mergeTinyArea * 24, Math.round(totalArea * (vectorSettings.embeddedMergeRatio || 0.008)));
+  for (let pass = 0; pass < 2; pass += 1) {
+    let changed = 0;
+    const regions = collectVectorRegions(keys, width, height);
+    for (const region of regions) {
+      if (region.pixels.length <= mergeTinyArea || region.pixels.length > maxEmbeddedArea) continue;
+      if (vectorSettings.protectLineArt && isDarkVectorKey(region.key)) continue;
+      const neighbor = dominantNeighborVectorKey(region.pixels, keys, width, height, region.key);
+      if (!neighbor?.key) continue;
+      if (vectorSettings.protectLineArt && isDarkVectorKey(neighbor.key)) continue;
+      if (!vectorKeysCloseForEmbeddedMerge(region.key, neighbor.key, vectorSettings)) continue;
+      const boundaryContact = vectorRegionBoundaryContact(region.pixels, keys, width, height, region.key);
+      const dominantBoundaryRatio = neighbor.count / Math.max(1, boundaryContact);
+      const sizeSupport = neighbor.count / Math.max(1, Math.sqrt(region.pixels.length));
+      if (dominantBoundaryRatio < 0.58 || sizeSupport < 1.35) continue;
+      for (const pixel of region.pixels) keys[pixel] = neighbor.key;
+      changed += 1;
+    }
+    if (!changed) break;
+  }
 }
 
 function mergeVectorEdgeBands(keys, width, height, vectorSettings = {}, mergeTinyArea = 4) {
@@ -402,6 +471,19 @@ function dominantNeighborVectorKey(pixels, keys, width, height, ownKey) {
   return key ? { key, count } : null;
 }
 
+function vectorRegionBoundaryContact(pixels, keys, width, height, ownKey) {
+  let contact = 0;
+  for (const index of pixels) {
+    const x = index % width;
+    const y = Math.floor(index / width);
+    for (const next of [x > 0 ? index - 1 : -1, x < width - 1 ? index + 1 : -1, y > 0 ? index - width : -1, y < height - 1 ? index + width : -1]) {
+      const key = next >= 0 ? keys[next] : null;
+      if (key && key !== ownKey) contact += 1;
+    }
+  }
+  return contact;
+}
+
 function vectorKeysCloseForBandMerge(keyA, keyB, vectorSettings = {}) {
   const rgbA = vectorKeyRgb(keyA);
   const rgbB = vectorKeyRgb(keyB);
@@ -415,6 +497,20 @@ function vectorKeysCloseForBandMerge(keyA, keyB, vectorSettings = {}) {
     && Math.abs(rgbA[2] - rgbB[2]) < 62
     && Math.abs(metricsA.saturation - metricsB.saturation) < 0.22;
   return similarHue && Math.abs(metricsA.lightness - metricsB.lightness) < 54;
+}
+
+function vectorKeysCloseForEmbeddedMerge(keyA, keyB, vectorSettings = {}) {
+  const rgbA = vectorKeyRgb(keyA);
+  const rgbB = vectorKeyRgb(keyB);
+  if (!rgbA || !rgbB) return false;
+  const metricsA = colorMetrics(rgbA[0], rgbA[1], rgbA[2]);
+  const metricsB = colorMetrics(rgbB[0], rgbB[1], rgbB[2]);
+  if (vectorSettings.protectLineArt && (isProtectedVectorLineArt(metricsA) || isProtectedVectorLineArt(metricsB))) return false;
+  const distance = Math.sqrt(((rgbA[0] - rgbB[0]) ** 2 + (rgbA[1] - rgbB[1]) ** 2 + (rgbA[2] - rgbB[2]) ** 2) / 3);
+  if (distance <= 34) return true;
+  return distance <= 46
+    && Math.abs(metricsA.lightness - metricsB.lightness) < 28
+    && Math.abs(metricsA.saturation - metricsB.saturation) < 0.16;
 }
 
 function vectorKeyRgb(key = "") {

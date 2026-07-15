@@ -39,6 +39,7 @@ This file is for continuing the project from another Codex thread or device.
   - `Mask source-connected dark exteriors`
   - `Merge SVG edge color bands`
   - `Protect neutral illustration interiors`
+  - `Merge embedded SVG color patches`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -59,7 +60,8 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
   - If continuing in another Codex task or on another device, start by reading this file, then run `git pull` on `main`.
   - The next useful work should stay algorithm/QA-focused rather than UI-focused unless the product direction changes.
   - Completed next stage after this note: neutral light illustration interior matte protection with regression coverage.
-  - Recommended next stage: continue SVG path simplification/color-region merging, or tune real sticker-pack split behavior against more representative assets.
+  - Completed next SVG stage after this note: embedded near-color SVG patch merging with line-art protection.
+  - Recommended next stage: tune real sticker-pack split behavior against more representative assets, or continue SVG path simplification at the curve/command-count layer.
   - Secondary target: actual AI cancellation behavior for large images beyond the existing timeout guard.
 - The latest algorithm work has focused on making quality regressions measurable before changing more core behavior.
 - Current pushed head before this handoff note: `fdafacb Record SVG edge band QA`; latest local validation ran the full 15-image browser QA without changing the 15-image baseline score.
@@ -108,6 +110,14 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - Added matte regression coverage in `qa/test-matte-refine.mjs`: `neutralInteriorShadowAlpha` restores to `172`, while the nearby neutral background patch stays a soft edge at `37.45` instead of becoming solid.
 - Fixed browser QA portability for device migration: `qa/test-ai-timeout-guard.mjs` and `qa/test-solid-background-fast-cutout.mjs` no longer default to the old `/Users/wzy/...` runtime path, can resolve pnpm-packed Playwright, and can use installed Chrome/Edge when Playwright's bundled browser is missing.
 - Validation on `2026-07-15`: syntax checks passed for updated scripts; matte, image-type, multi-split, SVG vector, AI timeout guard, report validation, report compare, runner health, summary risk, report metric coverage, and solid-background fast-cutout QA all passed locally.
+
+### Embedded SVG Color Patch Merging - Done
+
+- Added `mergeVectorEmbeddedColorRegions()` before SVG edge-band merging.
+- Medium-small, near-color regions embedded in a dominant neighboring fill now merge into that fill when boundary contact is strong. This reduces editable SVG patch clutter for flat stickers and icons without globally lowering detail.
+- Protected dark and gray line art are excluded from the embedded merge path, so logo strokes and drawn lines stay as separate editable paths.
+- Added SVG regression coverage in `qa/test-svg-vector.mjs`: embedded green patches merge to `embeddedPatchGreenGroups: 1`, path count remains `5`, dark line-art area remains `708`, and gray line-art area remains `140`.
+- Validation on `2026-07-15`: syntax checks passed; matte, image-type, multi-split, SVG vector, AI timeout guard, report validation, report compare, runner health, summary risk, report metric coverage, and solid-background fast-cutout QA all passed locally.
 
 ## Already Implemented Before UI Pass
 
