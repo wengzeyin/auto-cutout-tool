@@ -7170,6 +7170,7 @@ function imageDataToVectorRegions(imageData, alphaThreshold, vectorSettings = ge
   stabilizeVectorColorKeys(keys, width, height, vectorSettings);
   closeVectorMicroGaps(keys, width, height, vectorSettings);
   mergeVectorEmbeddedColorRegions(keys, width, height, vectorSettings, mergeTinyArea);
+  mergeVectorFlatShadeRegions(keys, width, height, vectorSettings, mergeTinyArea);
   mergeVectorEdgeBands(keys, width, height, vectorSettings, mergeTinyArea);
 
   const finalRegions = collectVectorRegions(keys, width, height);
@@ -7236,6 +7237,59 @@ function mergeVectorEdgeBands(keys, width, height, vectorSettings = {}, mergeTin
     }
     if (!changed) break;
   }
+}
+
+function mergeVectorFlatShadeRegions(keys, width, height, vectorSettings = {}, mergeTinyArea = 4) {
+  if (vectorSettings.mode === "fast" || (!vectorSettings.flattenAlpha && vectorSettings.mode !== "precise")) return;
+  const totalArea = width * height;
+  const maxShadeArea = Math.max(mergeTinyArea * 80, Math.round(totalArea * (vectorSettings.flatShadeMergeRatio || 0.052)));
+  for (let pass = 0; pass < 2; pass += 1) {
+    let changed = 0;
+    const regions = collectVectorRegions(keys, width, height);
+    for (const region of regions) {
+      if (region.pixels.length <= mergeTinyArea * 8 || region.pixels.length > maxShadeArea) continue;
+      if (vectorSettings.protectLineArt && isDarkVectorKey(region.key)) continue;
+      const bounds = vectorRegionBounds(region.pixels, width);
+      const boxArea = Math.max(1, (bounds.maxX - bounds.minX + 1) * (bounds.maxY - bounds.minY + 1));
+      const density = region.pixels.length / boxArea;
+      if (density < 0.62) continue;
+
+      const neighbor = dominantMergeableFlatShadeNeighborVectorKey(region.pixels, keys, width, height, region.key, vectorSettings);
+      if (!neighbor?.key) continue;
+
+      const boundaryContact = vectorRegionBoundaryContact(region.pixels, keys, width, height, region.key);
+      const dominantBoundaryRatio = neighbor.count / Math.max(1, boundaryContact);
+      const perimeterScale = neighbor.count / Math.max(1, Math.sqrt(region.pixels.length));
+      if (dominantBoundaryRatio < 0.58 || perimeterScale < 1.55) continue;
+
+      for (const pixel of region.pixels) keys[pixel] = neighbor.key;
+      changed += 1;
+    }
+    if (!changed) break;
+  }
+}
+
+function dominantMergeableFlatShadeNeighborVectorKey(pixels, keys, width, height, ownKey, vectorSettings = {}) {
+  const counts = new Map();
+  for (const index of pixels) {
+    const x = index % width;
+    const y = Math.floor(index / width);
+    const neighbors = [
+      x > 0 ? index - 1 : -1,
+      x < width - 1 ? index + 1 : -1,
+      y > 0 ? index - width : -1,
+      y < height - 1 ? index + width : -1,
+    ];
+    for (const next of neighbors) {
+      const key = next >= 0 ? keys[next] : null;
+      if (!key || key === ownKey) continue;
+      if (vectorSettings.protectLineArt && isDarkVectorKey(key)) continue;
+      if (!vectorKeysCloseForFlatShadeMerge(ownKey, key, vectorSettings)) continue;
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+  }
+  const [key, count] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0] || [];
+  return key ? { key, count } : null;
 }
 
 function vectorRegionBounds(pixels, width) {
@@ -7321,6 +7375,19 @@ function vectorKeysCloseForEmbeddedMerge(keyA, keyB, vectorSettings = {}) {
   return distance <= 46
     && Math.abs(metricsA.lightness - metricsB.lightness) < 28
     && Math.abs(metricsA.saturation - metricsB.saturation) < 0.16;
+}
+
+function vectorKeysCloseForFlatShadeMerge(keyA, keyB, vectorSettings = {}) {
+  const rgbA = vectorKeyRgb(keyA);
+  const rgbB = vectorKeyRgb(keyB);
+  if (!rgbA || !rgbB) return false;
+  const metricsA = colorMetrics(rgbA[0], rgbA[1], rgbA[2]);
+  const metricsB = colorMetrics(rgbB[0], rgbB[1], rgbB[2]);
+  if (vectorSettings.protectLineArt && (isProtectedVectorLineArt(metricsA) || isProtectedVectorLineArt(metricsB))) return false;
+  const distance = Math.sqrt(((rgbA[0] - rgbB[0]) ** 2 + (rgbA[1] - rgbB[1]) ** 2 + (rgbA[2] - rgbB[2]) ** 2) / 3);
+  return distance <= 45
+    && Math.abs(metricsA.lightness - metricsB.lightness) <= 36
+    && Math.abs(metricsA.saturation - metricsB.saturation) <= 0.18;
 }
 
 function vectorKeyRgb(key = "") {

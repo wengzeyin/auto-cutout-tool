@@ -43,6 +43,7 @@ This file is for continuing the project from another Codex thread or device.
   - `Protect micro split badges`
   - `Normalize directional photo cores`
   - `Vendor local ZIP for offline QA`
+  - `Merge SVG flat shade patches`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -67,6 +68,7 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
   - Completed next split stage after this note: compact micro-badge split protection between larger stickers.
   - Completed next photo matte stage after this note: directionally supported semi-transparent photo cores now normalize without hardening isolated hair strands.
   - Completed QA stability stage after this note: removed the external JSZip CDN dependency that blocked app initialization in restricted/offline browser QA, and restored the AI-timeout and solid-background browser guard tests.
+  - Completed next SVG stage after this note: low-contrast flat shade patches merge into nearby same-hue fills when line art remains protected.
   - Recommended next stage: tune real sticker-pack split behavior against more representative assets, or continue SVG path simplification at the curve/command-count layer.
   - Secondary target: actual AI cancellation behavior for large images beyond the existing timeout guard.
 - The latest algorithm work has focused on making quality regressions measurable before changing more core behavior.
@@ -151,6 +153,14 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - Updated browser guard tests to upload generated PNGs through Playwright `setInputFiles()` instead of manually assigning `DataTransfer.files`.
 - Added `qa/test-local-zip.mjs` to check ZIP signature, nested filenames, and non-empty output.
 - Validation on `2026-07-15`: `qa/test-ai-timeout-guard.mjs` passed in 539ms recovery, `qa/test-solid-background-fast-cutout.mjs` passed for black, black-halo, and white cases with no model-resource requests, and the local ZIP regression passed.
+
+### SVG Flat Shade Patch Merging - Done
+
+- Added `mergeVectorFlatShadeRegions()` after embedded color patch merging and before edge-band merging.
+- Low-contrast, same-hue flat shade/highlight patches can now merge into the nearest mergeable fill even when protected line art touches part of the patch boundary. This reduces extra editable patch paths for flat stickers/icons without swallowing black/gray line art.
+- The merge is gated by area, density, color distance, dominant same-hue boundary contact, and line-art protection.
+- Added SVG regression coverage in `qa/test-svg-vector.mjs`: `flatShadePathCount` is `5`, `flatShadeGreenGroups` stays at `2` or lower, and protected dark line-art area remains `920`.
+- Validation on `2026-07-15`: syntax checks passed; matte, image-type, multi-split, SVG vector, local ZIP, report validation, report compare, runner health, summary risk, report metric coverage, AI timeout guard, and solid-background fast-cutout QA all passed locally.
 
 ## Already Implemented Before UI Pass
 
