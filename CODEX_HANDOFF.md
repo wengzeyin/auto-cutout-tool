@@ -48,6 +48,7 @@ This file is for continuing the project from another Codex thread or device.
   - `Polish product diagonal edges`
   - `Split repeated sticker rows`
   - `Simplify SVG fill path anchors`
+  - `Track SVG cubic handle QA metric`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -77,6 +78,7 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
   - Completed next product matte stage after this note: product-only diagonal/stair-step edge polishing adds a softer alpha transition after hard-edge anti-aliasing.
   - Completed next split stage after this note: strong multi-sticker mode now has a conservative horizontal repeated-row splitter, matching the existing vertical stack splitter.
   - Completed next SVG stage after this note: precise SVG path smoothing now protects only actual dark/gray line-art groups and simplifies low-curvature fill anchors after smoothing.
+  - Completed next QA stage after this note: generated QA reports now track `svgCubicHandleOutlierRatio`, validate it, compare it against baselines, and require real-report coverage.
   - Recommended next stage: tune real sticker-pack split behavior against more representative assets, or continue SVG path simplification at the curve/command-count layer.
 - The latest algorithm work has focused on making quality regressions measurable before changing more core behavior.
 - Current pushed head before this handoff note: `fdafacb Record SVG edge band QA`; latest local validation ran the full 15-image browser QA without changing the 15-image baseline score.
@@ -199,6 +201,14 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - Added a post-smoothing low-curvature anchor reduction pass for non-line-art fill paths. This keeps filled color regions smooth while trimming redundant cubic anchors before export.
 - Tightened the simple flat-art SVG command-count regression in `qa/test-svg-vector.mjs` from `650` to `180`; the latest fixture exports `166` commands, keeps cubic paths, preserves dark line art area `126`, gray line art area `384`, and has no cubic handle outliers.
 - Validation on `2026-07-15`: syntax checks passed; SVG vector, matte, multi-split, image-type, local ZIP, AI timeout guard, solid-background fast-cutout, report validation, report compare, runner health, summary risk, and report metric coverage QA all passed locally.
+
+### SVG Cubic Handle QA Metric - Done
+
+- Added `svgCubicHandleOutlierRatio` to generated QA metrics and the HTML QA report.
+- `estimateSvgMetrics()` now computes the ratio of cubic handles that extend too far relative to their traced segment; precise SVG blocky-risk detection also treats high handle outlier ratio as a risk.
+- Added validation and baseline comparison gates in `qa/validate-report.mjs` and `qa/compare-report.mjs`.
+- Updated report metric coverage so real browser QA reports must include both `svgFractionalCoordinateRatio` and `svgCubicHandleOutlierRatio` on SVG-relevant rows.
+- Validation on `2026-07-15`: syntax checks passed; report validation, report compare, report metric coverage, SVG vector, matte, multi-split, image-type, local ZIP, AI timeout guard, solid-background fast-cutout, runner health, and summary risk QA all passed locally.
 
 ## Already Implemented Before UI Pass
 

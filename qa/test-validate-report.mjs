@@ -83,6 +83,7 @@ function makeReport({ fail }) {
       svgCommandCount: 160,
       svgCommandDensity: 8.5,
       svgFractionalCoordinateRatio: 0.52,
+      svgCubicHandleOutlierRatio: 0.01,
       svgBlockyRisk: false,
     };
     if (/透明材质/.test(scenario)) metrics.semiTransparentCoreRatio = 0.82;
@@ -98,6 +99,7 @@ function makeReport({ fail }) {
       delete metrics.smallElementScoreAverage;
       delete metrics.svgCommandDensity;
       delete metrics.svgFractionalCoordinateRatio;
+      delete metrics.svgCubicHandleOutlierRatio;
     }
     return {
       index: index + 1,

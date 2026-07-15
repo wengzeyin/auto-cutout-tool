@@ -6288,6 +6288,7 @@ function computeCurrentQaMetrics() {
     svgCommandDensity: roundMetric(svgMetrics.commandDensity),
     svgGridAlignedRatio: roundMetric(svgMetrics.gridAlignedRatio),
     svgFractionalCoordinateRatio: roundMetric(svgMetrics.fractionalCoordinateRatio),
+    svgCubicHandleOutlierRatio: roundMetric(svgMetrics.cubicHandleOutlierRatio),
     svgBlockyRisk: svgMetrics.blockyRisk,
     warnings: matteQuality.warnings || [],
   };
@@ -6450,7 +6451,7 @@ function clampScore(value) {
 }
 
 function estimateSvgMetrics(canvas) {
-  if (!canvas?.width) return { pathCount: 0, commandCount: 0, visibleArea: 0, commandDensity: 0, gridAlignedRatio: 0, fractionalCoordinateRatio: 0, blockyRisk: false };
+  if (!canvas?.width) return { pathCount: 0, commandCount: 0, visibleArea: 0, commandDensity: 0, gridAlignedRatio: 0, fractionalCoordinateRatio: 0, cubicHandleOutlierRatio: 0, blockyRisk: false };
   const vectorSettings = getVectorSettings();
   const source = prepareVectorCanvas(canvas, vectorSettings.maxEdge);
   const ctx = source.getContext("2d", { willReadFrequently: true });
@@ -6460,28 +6461,37 @@ function estimateSvgMetrics(canvas) {
     const commands = countSvgPathCommands(group.path);
     const gridCounts = measureGridAlignedCoordinateCounts(group.path);
     const fractionalCounts = measureFractionalCoordinateCounts(group.path);
+    const cubicHandleOutlierRatio = measureCubicHandleOutlierRatio(group.path);
     acc.pathCount += group.regionCount || 1;
     acc.commandCount += commands;
     acc.visibleArea += group.area || 0;
     acc.gridAlignedValues += gridCounts.aligned;
     acc.fractionalValues += fractionalCounts.fractional;
     acc.coordinateValues += gridCounts.total;
+    acc.cubicCommands += countCubicPathCommands(group.path);
+    acc.cubicHandleOutliers += cubicHandleOutlierRatio * countCubicPathCommands(group.path);
     return acc;
-  }, { pathCount: 0, commandCount: 0, visibleArea: 0, commandDensity: 0, gridAlignedRatio: 0, fractionalCoordinateRatio: 0, gridAlignedValues: 0, fractionalValues: 0, coordinateValues: 0, blockyRisk: false });
+  }, { pathCount: 0, commandCount: 0, visibleArea: 0, commandDensity: 0, gridAlignedRatio: 0, fractionalCoordinateRatio: 0, cubicHandleOutlierRatio: 0, cubicCommands: 0, cubicHandleOutliers: 0, gridAlignedValues: 0, fractionalValues: 0, coordinateValues: 0, blockyRisk: false });
   summary.commandDensity = summary.commandCount / Math.max(1, Math.sqrt(summary.visibleArea));
   summary.gridAlignedRatio = summary.gridAlignedValues / Math.max(1, summary.coordinateValues);
   summary.fractionalCoordinateRatio = summary.fractionalValues / Math.max(1, summary.coordinateValues);
+  summary.cubicHandleOutlierRatio = summary.cubicHandleOutliers / Math.max(1, summary.cubicCommands);
   summary.blockyRisk = summary.visibleArea > 0 && (
     summary.commandDensity > 18 ||
     (vectorSettings.mode === "precise" && summary.commandDensity > 14 && summary.pathCount > 60) ||
     (vectorSettings.mode === "precise" && summary.gridAlignedRatio > 0.62 && summary.commandCount > 24) ||
-    (vectorSettings.mode === "precise" && summary.fractionalCoordinateRatio < 0.24 && summary.commandCount > 24)
+    (vectorSettings.mode === "precise" && summary.fractionalCoordinateRatio < 0.24 && summary.commandCount > 24) ||
+    (vectorSettings.mode === "precise" && summary.cubicHandleOutlierRatio > 0.08 && summary.commandCount > 24)
   );
   return summary;
 }
 
 function countSvgPathCommands(path) {
   return (path.match(/[MLQCZ]/g) || []).length;
+}
+
+function countCubicPathCommands(path) {
+  return (path.match(/C/g) || []).length;
 }
 
 function measureGridAlignedCoordinateCounts(path) {
@@ -6494,6 +6504,33 @@ function measureFractionalCoordinateCounts(path) {
   const values = path.match(/-?\d+(?:\.\d+)?/g)?.map(Number) || [];
   const fractional = values.filter((value) => Math.abs(value - Math.round(value)) >= 0.08).length;
   return { fractional, total: values.length };
+}
+
+function measureCubicHandleOutlierRatio(path) {
+  const tokens = path.match(/[MCZ]|-?\d+(?:\.\d+)?/g) || [];
+  let cursor = [0, 0];
+  let cubicCount = 0;
+  let outliers = 0;
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token === "M") {
+      cursor = [Number(tokens[index + 1]), Number(tokens[index + 2])];
+      index += 2;
+    } else if (token === "C") {
+      const cp1 = [Number(tokens[index + 1]), Number(tokens[index + 2])];
+      const cp2 = [Number(tokens[index + 3]), Number(tokens[index + 4])];
+      const end = [Number(tokens[index + 5]), Number(tokens[index + 6])];
+      const segmentLength = Math.max(0.01, Math.hypot(end[0] - cursor[0], end[1] - cursor[1]));
+      if (
+        Math.hypot(cp1[0] - cursor[0], cp1[1] - cursor[1]) > segmentLength * 0.5 ||
+        Math.hypot(cp2[0] - end[0], cp2[1] - end[1]) > segmentLength * 0.5
+      ) outliers += 1;
+      cubicCount += 1;
+      cursor = end;
+      index += 6;
+    }
+  }
+  return outliers / Math.max(1, cubicCount);
 }
 
 function roundMetric(value) {
@@ -6550,6 +6587,7 @@ function generateQaReportHtml(report) {
         <td>${svgRisk}</td>
         <td>${escapeHtml([...score.notes || [], warnings || row.error || ""].filter(Boolean).join("；"))}</td>
         <td>${formatMetric(metrics.svgFractionalCoordinateRatio)}</td>
+        <td>${formatMetric(metrics.svgCubicHandleOutlierRatio)}</td>
         <td>${metrics.clearSmallElementCount ?? ""}</td>
         <td>${formatMetric(metrics.smallElementScoreMax)}</td>
         <td>${formatMetric(metrics.smallElementScoreAverage)}</td>
@@ -6583,7 +6621,7 @@ function generateQaReportHtml(report) {
         <th>元素数</th><th>小元素数</th><th>小元素风险</th>
         <th>alphaCoverage</th><th>edgeJaggedness</th><th>semiTransparentCore</th>
         <th>lineArtLoss</th><th>lightRegionLoss</th><th>whiteFringe</th><th>whiteFringePx</th><th>whiteFringeArea</th><th>lowAlphaFringe</th><th>fringeAvgAlpha</th><th>大框风险</th><th>svgPathCount</th><th>svgCommandCount</th><th>svgCommandDensity</th><th>svgGridAligned</th><th>SVG 块状风险</th><th>提示</th>
-        <th>svgFractional</th>
+        <th>svgFractional</th><th>svgCubicHandleOutliers</th>
         <th>clearSmallElements</th><th>smallElementScoreMax</th><th>smallElementScoreAvg</th>
       </tr>
     </thead>

@@ -21,7 +21,7 @@ const failures = [];
 
 if (pass.status !== 0) failures.push(`Expected complete coverage report to pass, got ${pass.status}: ${pass.stderr || pass.stdout}`);
 if (fail.status === 0) failures.push("Expected missing coverage report to fail.");
-if (!/svgFractionalCoordinateRatio|small-element metric/.test(`${fail.stdout}\n${fail.stderr}`)) {
+if (!/svgFractionalCoordinateRatio|svgCubicHandleOutlierRatio|small-element metric/.test(`${fail.stdout}\n${fail.stderr}`)) {
   failures.push("Expected missing coverage output to mention SVG or small-element metrics.");
 }
 
@@ -83,6 +83,7 @@ function makeMetrics(scenario, complete) {
   };
   if (/插画|图标|贴纸|logo|文字|商品|靠近/.test(scenario)) {
     metrics.svgFractionalCoordinateRatio = complete ? 0.52 : undefined;
+    metrics.svgCubicHandleOutlierRatio = complete ? 0.01 : undefined;
   }
   if (/贴纸合集|多元素|靠近|小物体|插画图标/.test(scenario)) {
     metrics.clearSmallElementCount = complete ? 2 : undefined;

@@ -20,6 +20,7 @@ const coverage = {
   rows: rows.length,
   svgScenarioRows: 0,
   svgMetricRows: 0,
+  svgCubicHandleMetricRows: 0,
   multiElementScenarioRows: 0,
   smallElementMetricRows: 0,
   smallElementRowsWithClearDetections: 0,
@@ -32,10 +33,12 @@ for (const row of rows) {
 
   if (isSvgScenario(scenario)) {
     coverage.svgScenarioRows += 1;
-    if (hasFiniteMetric(metrics, "svgFractionalCoordinateRatio")) {
+    const missing = ["svgFractionalCoordinateRatio", "svgCubicHandleOutlierRatio"].filter((field) => !hasFiniteMetric(metrics, field));
+    if (!missing.length) {
       coverage.svgMetricRows += 1;
+      coverage.svgCubicHandleMetricRows += 1;
     } else {
-      failures.push(`${name}: missing real-report svgFractionalCoordinateRatio coverage.`);
+      failures.push(`${name}: missing real-report SVG metric coverage (${missing.join(", ")}).`);
     }
   }
 
