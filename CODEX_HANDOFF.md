@@ -47,6 +47,7 @@ This file is for continuing the project from another Codex thread or device.
   - `Abort AI timeout and cancel tasks`
   - `Polish product diagonal edges`
   - `Split repeated sticker rows`
+  - `Simplify SVG fill path anchors`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -75,6 +76,7 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
   - Completed next AI control stage after this note: timeout and manual cancel now abort the active AI background-removal task instead of only resetting UI state.
   - Completed next product matte stage after this note: product-only diagonal/stair-step edge polishing adds a softer alpha transition after hard-edge anti-aliasing.
   - Completed next split stage after this note: strong multi-sticker mode now has a conservative horizontal repeated-row splitter, matching the existing vertical stack splitter.
+  - Completed next SVG stage after this note: precise SVG path smoothing now protects only actual dark/gray line-art groups and simplifies low-curvature fill anchors after smoothing.
   - Recommended next stage: tune real sticker-pack split behavior against more representative assets, or continue SVG path simplification at the curve/command-count layer.
 - The latest algorithm work has focused on making quality regressions measurable before changing more core behavior.
 - Current pushed head before this handoff note: `fdafacb Record SVG edge band QA`; latest local validation ran the full 15-image browser QA without changing the 15-image baseline score.
@@ -190,6 +192,13 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - Added `touching-horizontal-sticker-row` regression coverage in `qa/test-multi-split.mjs`; expected output is exactly 4 components.
 - Kept `continuous-subject-not-projection-split` as a guard; it still returns exactly 1 component after the new row splitter.
 - Validation on `2026-07-15`: syntax checks passed; multi-split, matte, image-type, SVG vector, local ZIP, AI timeout guard, solid-background fast-cutout, report validation, report compare, runner health, summary risk, and report metric coverage QA all passed locally.
+
+### SVG Fill Path Anchor Simplification - Done
+
+- Changed precise SVG path generation so global line-art protection no longer forces every color region to use line-art-conservative smoothing. Only actual protected dark/gray line-art keys keep conservative path settings.
+- Added a post-smoothing low-curvature anchor reduction pass for non-line-art fill paths. This keeps filled color regions smooth while trimming redundant cubic anchors before export.
+- Tightened the simple flat-art SVG command-count regression in `qa/test-svg-vector.mjs` from `650` to `180`; the latest fixture exports `166` commands, keeps cubic paths, preserves dark line art area `126`, gray line art area `384`, and has no cubic handle outliers.
+- Validation on `2026-07-15`: syntax checks passed; SVG vector, matte, multi-split, image-type, local ZIP, AI timeout guard, solid-background fast-cutout, report validation, report compare, runner health, summary risk, and report metric coverage QA all passed locally.
 
 ## Already Implemented Before UI Pass
 

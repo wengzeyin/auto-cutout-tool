@@ -7720,11 +7720,15 @@ function appendVectorRegion(groups, key, pixels, keys, width, height, vectorSett
     group = { path: "", area: 0, regionCount: 0, connectedRegionCount: 0 };
     groups.set(key, group);
   }
+  const pathSettings = {
+    ...vectorSettings,
+    protectLineArt: Boolean(vectorSettings.protectLineArt && isDarkVectorKey(key)),
+  };
   const loops = traceRegionLoops(pixels, keys, key, width, height);
   const path = loops
     .map((loop) => loopToPath(
-      smoothVectorLoop(simplifyVectorLoop(loop, vectorSettings.simplify || 1.4), vectorSettings.smoothPasses ?? 2),
-      vectorSettings,
+      smoothVectorLoop(simplifyVectorLoop(loop, pathSettings.simplify || 1.4), pathSettings.smoothPasses ?? 2),
+      pathSettings,
     ))
     .join("");
   if (!path) return;
@@ -7865,6 +7869,15 @@ function loopToCubicPath(loop, vectorSettings = {}) {
   }
   points = chaikinClosedPoints(points, vectorSettings.protectLineArt ? 1 : 2);
   points = reduceClosePoints(points, vectorSettings.protectLineArt ? 0.72 : 0.95);
+  points = reduceLowCurvaturePoints(
+    points,
+    vectorSettings.protectLineArt ? 0.18 : 0.52,
+    vectorSettings.protectLineArt ? 12 : 24,
+  );
+  if (!vectorSettings.protectLineArt && points.length > 14) {
+    const simplified = rdpSimplify([...points, points[0]], clamp((vectorSettings.simplify || 1.2) * 0.42, 0.42, 1.05));
+    points = sameVectorPoint(simplified[0], simplified[simplified.length - 1]) ? simplified.slice(0, -1) : simplified;
+  }
   if (points.length < 4) return loopToPath(loop, { mode: "fast" });
   let d = `M${roundPathNumber(points[0][0])} ${roundPathNumber(points[0][1])}`;
   const tension = vectorSettings.protectLineArt ? 0.42 : 0.5;
@@ -8028,6 +8041,29 @@ function reduceClosePoints(points, minDistance) {
     output.pop();
   }
   return output;
+}
+
+function reduceLowCurvaturePoints(points, tolerance = 0.2, maxSpan = 14) {
+  if (points.length < 8) return points;
+  const output = [];
+  for (let index = 0; index < points.length; index += 1) {
+    const prev = points[(index - 1 + points.length) % points.length];
+    const point = points[index];
+    const next = points[(index + 1) % points.length];
+    const span = Math.hypot(next[0] - prev[0], next[1] - prev[1]);
+    const prevDistance = Math.hypot(point[0] - prev[0], point[1] - prev[1]);
+    const nextDistance = Math.hypot(next[0] - point[0], next[1] - point[1]);
+    if (
+      span <= maxSpan &&
+      prevDistance > 0.01 &&
+      nextDistance > 0.01 &&
+      perpendicularDistance(point, prev, next) <= tolerance
+    ) {
+      continue;
+    }
+    output.push(point);
+  }
+  return output.length >= 4 ? output : points;
 }
 
 function rdpSimplify(points, epsilon) {
