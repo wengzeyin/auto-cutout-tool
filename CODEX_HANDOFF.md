@@ -53,6 +53,7 @@ This file is for continuing the project from another Codex thread or device.
   - `Guard manual repair controls`
   - `Split five-sticker rows`
   - `Filter isolated SVG speckles`
+  - `Add lightweight QA runner`
 - The first commit improves multi-element split QA and fixes Windows QA runner path handling.
 - The second commit completes Stage 1 of the UI pass and adds this handoff file.
 - The third commit completes Stage 2 of the UI pass with clearer progress states and mobile ordering.
@@ -87,6 +88,7 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
   - Completed next designer-usability QA stage after this note: static QA now guards the manual repair controls for split, merge, add-box, adjust-box, and export-selection workflows.
   - Completed next split stage after this note: horizontal repeated sticker-row splitting now runs before generic projection peaks, chooses better part counts from peak/valley balance, and guards against splitting continuous banners.
   - Completed next SVG cleanup stage after this note: isolated 3x3/4x4 transparent-background speckles are filtered from SVG output while 5x5 micro badges and protected line art remain.
+  - Completed next QA regression stage after this note: `qa/run-lightweight-qa.mjs` now runs the full 14-test lightweight gate with per-test durations and a JSON summary.
   - Recommended next stage: tune real sticker-pack split behavior against more representative assets, or continue SVG path simplification at the curve/command-count layer.
 - The latest algorithm work has focused on making quality regressions measurable before changing more core behavior.
 - Current pushed head before this handoff note: `fdafacb Record SVG edge band QA`; latest local validation ran the full 15-image browser QA without changing the 15-image baseline score.
@@ -249,6 +251,13 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 - Added `makeIsolatedSpeckleStickerImageData()` regression coverage in `qa/test-svg-vector.mjs`.
 - The SVG regression now asserts isolated tiny noise groups are 0, the 5x5 blue micro badge survives with area 25, dark line art survives with area 860, and the speckled fixture stays at 10 paths or fewer.
 - Validation on `2026-07-15`: syntax checks passed; SVG vector, matte worker parity, matte refine, image-type, multi-split, local ZIP, manual repair controls, AI timeout guard, solid-background fast-cutout, report validation, report compare, report metric coverage, runner health, and summary risk QA all passed locally.
+
+### Lightweight QA Runner - Done
+
+- Added `qa/run-lightweight-qa.mjs`.
+- The runner executes the current lightweight algorithm gate in one command: matte worker parity, matte refine, image type, multi-split, SVG vector, local ZIP, manual repair controls, AI timeout guard, solid-background fast cutout, report validation, report comparison, report metric coverage, runner health, and summary risk.
+- It prints one PASS/FAIL line per test with duration, includes stdout/stderr for failing tests, emits a JSON summary, and exits nonzero on any failure.
+- Validation on `2026-07-15`: `node --check qa/run-lightweight-qa.mjs` passed; `node qa/run-lightweight-qa.mjs` passed 14/14 tests in about 20 seconds.
 
 ## Already Implemented Before UI Pass
 
@@ -470,19 +479,21 @@ UI/UX Stage 1-5 is complete. Next work may continue algorithm quality optimizati
 
 ## Do Not Lose
 
-- Run lightweight QA after UI edits:
+- Run lightweight QA after algorithm edits:
+  - `node qa/run-lightweight-qa.mjs`
+- If the runner fails, use the single-test commands below to isolate the issue:
+  - `node qa/test-matte-worker-parity.mjs`
   - `node qa/test-matte-refine.mjs`
   - `node qa/test-image-type.mjs`
   - `node qa/test-multi-split.mjs`
   - `node qa/test-svg-vector.mjs`
-  - `node qa/test-matte-worker-parity.mjs`
+  - `node qa/test-local-zip.mjs`
   - `node qa/test-manual-repair-controls.mjs`
   - `node qa/test-ai-timeout-guard.mjs`
-  - `node qa/test-local-zip.mjs`
+  - `node qa/test-solid-background-fast-cutout.mjs`
   - `node qa/test-validate-report.mjs`
   - `node qa/test-compare-report.mjs`
+  - `node qa/test-report-metric-coverage.mjs`
   - `node qa/test-runner-health.mjs`
   - `node qa/test-summary-risk.mjs`
-  - `node qa/test-report-metric-coverage.mjs`
-  - `node qa/test-solid-background-fast-cutout.mjs`
 - For UI-only edits, also manually check upload, process, result download, and mobile layout.
