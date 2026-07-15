@@ -631,6 +631,7 @@ function normalizeDenseCoreAlpha(image, settings) {
   for (let index = 0; index < alphaSource.length; index += 1) alphaSource[index] = image.data[index * 4 + 3];
   const neighborThreshold = Number(settings.denseCoreNeighborThreshold || 96);
   const neighborCount = Number(settings.denseCoreNeighborCount || 15);
+  const directionalNeighborCount = Number(settings.denseCoreDirectionalNeighborCount || Math.max(8, neighborCount - 4));
   const transparentThreshold = Number(settings.denseCoreTransparentThreshold || 10);
   const transparentLimit = Number(settings.denseCoreTransparentLimit ?? 2);
   for (let index = 0; index < alphaSource.length; index += 1) {
@@ -638,7 +639,10 @@ function normalizeDenseCoreAlpha(image, settings) {
     if (alpha < threshold || alpha >= 245) continue;
     const x = index % width;
     const y = Math.floor(index / width);
-    if (countAlphaNeighbors(alphaSource, x, y, 2, neighborThreshold) < neighborCount) continue;
+    const neighborTotal = countAlphaNeighbors(alphaSource, x, y, 2, neighborThreshold);
+    const directionallySupported = neighborTotal >= directionalNeighborCount
+      && hasDirectionalAlphaNeighborSupport(alphaSource, x, y, 2, neighborThreshold, 2);
+    if (neighborTotal < neighborCount && !directionallySupported) continue;
     if (countAlphaNeighbors(alphaSource, x, y, 2, transparentThreshold, true) > transparentLimit) continue;
     image.data[index * 4 + 3] = 255;
   }
@@ -691,6 +695,24 @@ function countAlphaNeighbors(alphaSource, x, y, radius, threshold, below = false
     }
   }
   return count;
+}
+
+function hasDirectionalAlphaNeighborSupport(alphaSource, x, y, radius, threshold, minPerDirection) {
+  const buckets = { left: 0, right: 0, up: 0, down: 0 };
+  for (let yy = Math.max(0, y - radius); yy <= Math.min(height - 1, y + radius); yy += 1) {
+    for (let xx = Math.max(0, x - radius); xx <= Math.min(width - 1, x + radius); xx += 1) {
+      if (xx === x && yy === y) continue;
+      if (alphaSource[yy * width + xx] < threshold) continue;
+      if (xx < x) buckets.left += 1;
+      if (xx > x) buckets.right += 1;
+      if (yy < y) buckets.up += 1;
+      if (yy > y) buckets.down += 1;
+    }
+  }
+  return buckets.left >= minPerDirection
+    && buckets.right >= minPerDirection
+    && buckets.up >= minPerDirection
+    && buckets.down >= minPerDirection;
 }
 
 function edgeJaggedness(image) {
@@ -1276,6 +1298,23 @@ normalizeDenseCoreAlpha(denseCoreAfter, {
   denseCoreTransparentThreshold: 8,
   denseCoreTransparentLimit: 3,
 });
+const directionalCoreBefore = makeImageData([255, 255, 255, 24]);
+const directionalCore = [];
+const directionalHair = [];
+fillRect(directionalCoreBefore, 38, 38, 40, 40, [96, 128, 164, 118]);
+directionalCore.push(39 * width + 39);
+drawLine(directionalCoreBefore, 112, 36, 112, 86, [96, 128, 164, 118], 0, directionalHair);
+const directionalCoreAfter = makeImageData([255, 255, 255, 0]);
+directionalCoreAfter.data.set(directionalCoreBefore.data);
+normalizeDenseCoreAlpha(directionalCoreAfter, {
+  imageType: "photo",
+  denseCoreNormalizeThreshold: 112,
+  denseCoreNeighborThreshold: 96,
+  denseCoreNeighborCount: 12,
+  denseCoreDirectionalNeighborCount: 8,
+  denseCoreTransparentThreshold: 8,
+  denseCoreTransparentLimit: 3,
+});
 const postEdgeCoreBefore = makeImageData([255, 255, 255, 0]);
 const postEdgeCoreBand = [];
 const postEdgeHair = [];
@@ -1353,6 +1392,8 @@ const metrics = {
   semiEdgeAfter: averageAlphaInRect(semiCoreAfter, 72, 24, 88, 36),
   denseCoreAfter: averageAlpha(denseCoreAfter, denseCore),
   denseHairAfter: averageAlpha(denseCoreAfter, fineHair),
+  directionalCoreAfter: averageAlpha(directionalCoreAfter, directionalCore),
+  directionalHairAfter: averageAlpha(directionalCoreAfter, directionalHair),
   postEdgeCoreAfter: averageAlpha(postEdgeCoreAfter, postEdgeCoreBand),
   postEdgeHairAfter: averageAlpha(postEdgeCoreAfter, postEdgeHair),
   glassCoreBefore: averageAlpha(glassBefore, glassCore),
@@ -1432,6 +1473,8 @@ if (metrics.semiCoreAfter < 250) failures.push(`semi-transparent core not normal
 if (metrics.semiEdgeAfter > 145) failures.push(`isolated semi-transparent edge was over-normalized: ${metrics.semiEdgeAfter.toFixed(1)}`);
 if (metrics.denseCoreAfter < 250) failures.push(`dense photo core was not normalized: ${metrics.denseCoreAfter.toFixed(1)}`);
 if (metrics.denseHairAfter > 150) failures.push(`fine photo hair was over-normalized: ${metrics.denseHairAfter.toFixed(1)}`);
+if (metrics.directionalCoreAfter < 250) failures.push(`directionally supported photo core was not normalized: ${metrics.directionalCoreAfter.toFixed(1)}`);
+if (metrics.directionalHairAfter > 150) failures.push(`directional core guard over-normalized fine hair: ${metrics.directionalHairAfter.toFixed(1)}`);
 if (metrics.postEdgeCoreAfter < 250) failures.push(`post-edge photo core was not restored: ${metrics.postEdgeCoreAfter.toFixed(1)}`);
 if (metrics.postEdgeHairAfter > 190) failures.push(`post-edge fine hair was over-normalized: ${metrics.postEdgeHairAfter.toFixed(1)}`);
 if (metrics.glassCoreAfter > 238) failures.push(`transparent material core over-normalized: ${metrics.glassCoreBefore.toFixed(1)} -> ${metrics.glassCoreAfter.toFixed(1)}`);

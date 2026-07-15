@@ -838,6 +838,7 @@ function buildMatteProfile(base, imageType = "unknown") {
     profile.denseCoreNormalizeThreshold = profile.fidelity === "preserve" ? 132 : 112;
     profile.denseCoreNeighborThreshold = profile.fidelity === "preserve" ? 118 : 96;
     profile.denseCoreNeighborCount = profile.fidelity === "preserve" ? 17 : 12;
+    profile.denseCoreDirectionalNeighborCount = profile.fidelity === "preserve" ? 12 : 8;
     profile.denseCoreTransparentThreshold = Math.max(8, profile.edgeLow);
     profile.denseCoreTransparentLimit = profile.fidelity === "preserve" ? 2 : 3;
     profile.postEdgeCoreNormalizeThreshold = profile.fidelity === "preserve" ? 142 : 124;
@@ -2345,6 +2346,7 @@ function normalizeDenseCoreAlpha(imageData, settings) {
   for (let index = 0; index < source.length; index += 1) source[index] = data[index * 4 + 3];
   const neighborThreshold = Number(settings.denseCoreNeighborThreshold || 96);
   const neighborCount = Number(settings.denseCoreNeighborCount || 15);
+  const directionalNeighborCount = Number(settings.denseCoreDirectionalNeighborCount || Math.max(8, neighborCount - 4));
   const transparentThreshold = Number(settings.denseCoreTransparentThreshold || 10);
   const transparentLimit = Number(settings.denseCoreTransparentLimit ?? 2);
   for (let index = 0; index < source.length; index += 1) {
@@ -2352,7 +2354,10 @@ function normalizeDenseCoreAlpha(imageData, settings) {
     if (alpha < threshold || alpha >= 245) continue;
     const x = index % width;
     const y = Math.floor(index / width);
-    if (countAlphaNeighbors(source, width, height, x, y, 2, neighborThreshold) < neighborCount) continue;
+    const neighborTotal = countAlphaNeighbors(source, width, height, x, y, 2, neighborThreshold);
+    const directionallySupported = neighborTotal >= directionalNeighborCount
+      && hasDirectionalAlphaNeighborSupport(source, width, height, x, y, 2, neighborThreshold, 2);
+    if (neighborTotal < neighborCount && !directionallySupported) continue;
     if (countAlphaNeighbors(source, width, height, x, y, 2, transparentThreshold, true) > transparentLimit) continue;
     data[index * 4 + 3] = 255;
   }
@@ -2404,6 +2409,27 @@ function countAlphaNeighbors(alphaSource, width, height, x, y, radius, threshold
     }
   }
   return count;
+}
+
+function hasDirectionalAlphaNeighborSupport(alphaSource, width, height, x, y, radius, threshold, minPerDirection) {
+  const buckets = { left: 0, right: 0, up: 0, down: 0 };
+  for (let oy = -radius; oy <= radius; oy += 1) {
+    const py = y + oy;
+    if (py < 0 || py >= height) continue;
+    for (let ox = -radius; ox <= radius; ox += 1) {
+      const px = x + ox;
+      if (px < 0 || px >= width || (px === x && py === y)) continue;
+      if (alphaSource[py * width + px] < threshold) continue;
+      if (ox < 0) buckets.left += 1;
+      if (ox > 0) buckets.right += 1;
+      if (oy < 0) buckets.up += 1;
+      if (oy > 0) buckets.down += 1;
+    }
+  }
+  return buckets.left >= minPerDirection
+    && buckets.right >= minPerDirection
+    && buckets.up >= minPerDirection
+    && buckets.down >= minPerDirection;
 }
 
 function hasStrongAlphaNeighbor(alphaSource, width, height, x, y, radius, threshold, minCount) {
